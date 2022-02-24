@@ -1,0 +1,68 @@
+#! /bin/sh
+
+TPM_FUTUREPCRS=/home/krose/work/src/efi-measured-boot/tpm_futurepcr/tpm_futurepcr.py
+NEED_UMOUNT_EFI=''
+
+mount_efi() {
+    if ! grep -qs '/boot/efi ' /proc/mounts; then
+        mkdir -p "$EFI_MOUNT"
+        mount -r -n "$EFI_PART" "$EFI_MOUNT"
+        NEED_UMOUNT_EFI=1
+    fi
+}
+
+umount_efi() {
+    if [ -n "$NEED_UMOUNT_EFI" ]; then
+        umount -n "$EFI_MOUNT"
+        NEED_UMOUNT_EFI=''
+    fi
+}
+
+provision_counter() {
+    tpm2_nvdefine $COUNTER_HANDLE -C o -s 8 -g sha256 -a 'ownerread|ownerwrite|policywrite|nt=counter'
+    tpm2_nvincrement -C o $COUNTER_HANDLE
+}
+
+increment_counter() {
+    tpm2_nvincrement -C o $COUNTER_HANDLE
+}
+
+read_counter() {
+    tpm2_nvread -C o $COUNTER_HANDLE -s 8
+}
+
+next_counter() {
+    printf '%016x' "$((1 + 0x$(read_counter | $XXD -p)))" | $XXD -r -p
+}
+
+create_provision_context() {
+    tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c provision.ctx
+}
+
+seal_data() {
+    tpm2_startauthsession -S session.ctx
+    tpm2_policypcr -S session.ctx -l sha256:$SEAL_PCRS -f future_pcrs
+    tpm2_policynv -S session.ctx -C o -i counter -L policy $COUNTER_HANDLE ule
+    tpm2_create -C provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - -L policy -r sealed.priv -u sealed.pub
+    tpm2_flushcontext session.ctx
+    rm -f session.ctx
+}
+
+unseal_data() {
+    tpm2_load -Q -C provision.ctx -r sealed.priv -u sealed.pub -c load.ctx && \
+        tpm2_startauthsession -Q -S session.ctx --policy-session && \
+        tpm2_policypcr -Q -S session.ctx -l sha256:$SEAL_PCRS && \
+        tpm2_policynv -Q -C o -S session.ctx -i counter $COUNTER_HANDLE ule && \
+        tpm2_unseal -Q -c load.ctx -p session:session.ctx
+    rc=$?
+    if [ -e session.ctx ]; then
+        tpm2_flushcontext -Q session.ctx
+    fi
+    rm -f load.ctx session.ctx
+    return $rc
+}
+
+predict_future_pcrs() {
+    path_efi_app=$1
+    $TPM_FUTUREPCRS -L $SEAL_PCRS -H sha256 --override-bsa-path "$path_efi_app" -o future_pcrs -v
+}
