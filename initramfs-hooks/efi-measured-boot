@@ -19,15 +19,17 @@ for i in createprimary load startauthsession policypcr policynv unseal flushcont
 done
 copy_exec /usr/lib/x86_64-linux-gnu/libtss2-tcti-device.so.0 /usr/lib/x86_64-linux-gnu
 
-mkdir -p $DESTDIR/etc/efi-measured-boot
-for i in config functions; do
-    cp /etc/efi-measured-boot/$i $DESTDIR/etc/efi-measured-boot
-done
+mkdir -p "$DESTDIR"/etc/efi-measured-boot
+cp /etc/efi-measured-boot/config "$DESTDIR"/etc/efi-measured-boot/
+
+. /etc/efi-measured-boot/config
+mkdir -p "$DESTDIR/$APPDIR"
+cp "$APPDIR/"functions "$DESTDIR/$APPDIR/"
 
 force_load tpm_tis
 force_load tpm_crb
 
-# Hopefully this codepages/charsets is universal
+# Hopefully this codepage/charset combination is universal
 force_load vfat
 force_load nls_cp437
 force_load nls_ascii

@@ -1,0 +1,60 @@
+#! /bin/bash
+
+cmd=$0
+
+exec 3>&1 1>&2
+
+help_exit() {
+    cat <<EOF
+Syntax: $(basename $cmd) [<opt> ...] [<path instead of />]
+Options:
+    -v              Be verbose
+    -h              Show help
+EOF
+exit 0
+}
+
+vlog() {
+    if (( $verbose != 0 )); then
+        echo "$1"
+    fi
+}
+
+verbose=0
+
+while getopts ':hv' opt; do
+    case "$opt" in
+        h)
+            help_exit
+            ;;
+        v)
+            verbose=1
+            ;;
+        :)
+            echo "$OPTARG requires an argument"
+            ;;
+        ?)
+            echo "unknown argument"
+            exit 1
+            ;;
+    esac
+done
+shift $((OPTIND-1))
+
+trace_path=${1:-/}
+shift
+
+mount_point=$(stat -c '%m' $trace_path)
+vlog "path $trace_path is on filesystem mounted at $mount_point"
+
+set -e
+
+dev=( $(lsblk -n -o UUID,PATH,MOUNTPOINT -r | awk '$3 == "'"$mount_point"'" { print $1 " " $2; }') )
+if (( ${#dev[@]} == 0 )); then
+    echo "no block device found with mount point $mount_point"
+    exit 1
+fi
+devuuid=${dev[0]}
+devnode=${dev[1]}
+
+echo "$devuuid $devnode" 1>&3

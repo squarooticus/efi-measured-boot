@@ -1,0 +1,34 @@
+#! /bin/bash
+
+set -e
+
+exec 3>&1 1>&2
+
+. /etc/efi-measured-boot/config
+. "$APPDIR"/functions
+
+seal_to_efi_app() {
+    kernel=$1
+    loader=$2
+    rm -f sealed.pub sealed.priv
+    predict_future_pcrs "$loader"
+    seal_data <$LUKS_KEY
+    vmlinuz_target=$(basename $(readlink "$kernel"))
+    efi_emboot_dir=$EFI_MOUNT/EFI/debian/emboot/${vmlinuz_target#vmlinuz-}
+    mkdir -p "$efi_emboot_dir"
+    cp -f counter sealed.pub sealed.priv "$efi_emboot_dir"
+}
+
+mkdir -m 0700 -p /tmp/emboot-setup
+cd /tmp/emboot-setup
+
+read_counter >counter
+create_provision_context
+main_loader="$EFI_MOUNT"/"$(echo "EFI/$OS_SHORT_NAME/$OS_SHORT_NAME.EFI" | tr a-z A-Z)"
+old_loader="$EFI_MOUNT"/"$(echo "EFI/$OS_SHORT_NAME/${OS_SHORT_NAME}_OLD.EFI" | tr a-z A-Z)"
+seal_to_efi_app /vmlinuz "$main_loader"
+seal_to_efi_app /vmlinuz.old "$old_loader"
+
+sudo rm -rf /tmp/emboot-setup
+
+exit 0

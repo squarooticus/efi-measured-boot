@@ -1,0 +1,48 @@
+#! /bin/bash
+
+set -e
+
+exec 3>&1 1>&2
+
+. /etc/efi-measured-boot/config
+. "$APPDIR"/functions
+
+create_efi_app() {
+    kernel=$1
+    initrd=$2
+    output=$3
+    objcopy --add-section .osrel="/usr/lib/os-release" --change-section-vma .osrel=0x20000 \
+        --add-section .cmdline="./kernel-command-line.txt" --change-section-vma .cmdline=0x30000 \
+        --add-section .linux="$kernel" --change-section-vma .linux=0x2000000 \
+        --add-section .initrd="$initrd" --change-section-vma .initrd=0x3000000 \
+        /usr/lib/systemd/boot/efi/linuxx64.efi.stub "$output"
+}
+
+mkdir -m 0700 -p /tmp/emboot-setup
+cd /tmp/emboot-setup
+
+rootdev=( $("$APPDIR"/get_device_info /) )
+cryptdev=( $("$APPDIR"/get_crypttab_entry ${rootdev[1]}) )
+
+if [[ ${cryptdev[3]} != *luks* ]]; then
+    echo 'crypttab entry missing luks option'
+    echo "${cryptdev[3]}"
+    exit 1
+fi
+
+if [[ ${cryptdev[3]} != *keyscript=*emboot_unseal* ]]; then
+    echo 'keyscript option in crypttab entry missing or invalid'
+    echo "${cryptdev[3]}"
+    exit 1
+fi
+
+echo "root=UUID=${rootdev[0]} cryptdevice=${cryptdev[1]}:${cryptdev[0]} $KERNEL_PARAMS" >./kernel-command-line.txt
+
+main_loader="$EFI_MOUNT"/"$(echo "EFI/$OS_SHORT_NAME/$OS_SHORT_NAME.EFI" | tr a-z A-Z)"
+old_loader="$EFI_MOUNT"/"$(echo "EFI/$OS_SHORT_NAME/${OS_SHORT_NAME}_OLD.EFI" | tr a-z A-Z)"
+create_efi_app /vmlinuz /initrd.img "$main_loader"
+create_efi_app /vmlinuz.old /initrd.img.old "$old_loader"
+
+sudo rm -rf /tmp/emboot-setup
+
+exit 0

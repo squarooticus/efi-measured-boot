@@ -4,7 +4,7 @@ TPM_FUTUREPCRS=/home/krose/work/src/efi-measured-boot/tpm_futurepcr/tpm_futurepc
 NEED_UMOUNT_EFI=''
 
 mount_efi() {
-    if ! grep -qs '/boot/efi ' /proc/mounts; then
+    if ! grep -qs "$EFI_MOUNT " /proc/mounts; then
         mkdir -p "$EFI_MOUNT"
         mount -r -n "$EFI_PART" "$EFI_MOUNT"
         NEED_UMOUNT_EFI=1
@@ -19,6 +19,7 @@ umount_efi() {
 }
 
 provision_counter() {
+    tpm2_nvundefine $COUNTER_HANDLE -Q || true
     tpm2_nvdefine $COUNTER_HANDLE -C o -s 8 -g sha256 -a 'ownerread|ownerwrite|policywrite|nt=counter'
     tpm2_nvincrement -C o $COUNTER_HANDLE
 }
@@ -64,5 +65,5 @@ unseal_data() {
 
 predict_future_pcrs() {
     path_efi_app=$1
-    $TPM_FUTUREPCRS -L $SEAL_PCRS -H sha256 --override-bsa-path "$path_efi_app" -o future_pcrs -v
+    $TPM_FUTUREPCRS -L $SEAL_PCRS -H sha256 ${path_efi_app:+--substitute-bsa-unix-path "/boot/efi/EFI/DEBIAN/DEBIAN.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/DEBIAN/DEBIAN_OLD.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/DEBIAN/LINUX.EFI=$path_efi_app"} -o future_pcrs -v
 }
