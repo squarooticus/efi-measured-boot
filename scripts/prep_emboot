@@ -89,6 +89,8 @@ cp -f scripts/{get_crypttab_entry,get_device_info,emboot_install,emboot_seal_key
 mkdir -p "$BINDIR"
 cp -f scripts/update-emboot "$BINDIR/"
 
+(cd tpm_futurepcr && pip3 install .)
+
 rootdevinfo=( $(./scripts/get_device_info /) )
 cryptdev=( $(./scripts/get_crypttab_entry ${rootdevinfo[1]}) )
 

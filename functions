@@ -1,6 +1,5 @@
 #! /bin/sh
 
-TPM_FUTUREPCRS=/home/krose/work/src/efi-measured-boot/tpm_futurepcr/tpm_futurepcr.py
 NEED_UMOUNT_EFI=''
 
 mount_efi() {
@@ -66,5 +65,5 @@ unseal_data() {
 predict_future_pcrs() {
     path_efi_app=$1
     os_caps=$(echo -n $OS_SHORT_NAME | tr a-z A-Z)
-    $TPM_FUTUREPCRS -L $SEAL_PCRS -H sha256 ${path_efi_app:+--substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/$os_caps.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/${os_caps}_OLD.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/LINUX.EFI=$path_efi_app"} -o future_pcrs -v
+    tpm_futurepcr -L $SEAL_PCRS -H sha256 ${path_efi_app:+--substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/$os_caps.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/${os_caps}_OLD.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/LINUX.EFI=$path_efi_app"} -o future_pcrs -v
 }
