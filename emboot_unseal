@@ -22,7 +22,7 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
 
     mount_efi
     for i in counter sealed.pub sealed.priv; do
-        cp -f "$EFI_MOUNT/EFI/debian/emboot/$(uname -r)/$i" "$emboot_tmp/"
+        cp -f "$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot/$(uname -r)/$i" "$emboot_tmp/"
     done
     umount_efi
 

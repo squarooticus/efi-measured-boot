@@ -2,28 +2,6 @@
 
 exec 3>&1 1>&2
 
-CONFIGDIR=/etc/efi-measured-boot
-
-. $CONFIGDIR/config
-. ./functions
-
-quote_args() {
-    sq="'"
-    dq='"'
-    fs=/
-    space=""
-    for w; do
-        if [ -n "$w" -a -z "${w//[0-9a-zA-Z_,.:=$fs-]}" ]; then
-            echo -n "$space$w"
-        else
-            qw="'${w//$sq/$sq$dq$sq$dq$sq}'"
-            qw=${qw//$sq$sq}
-            echo -n "$space${qw:-$sq$sq}"
-        fi
-        space=" "
-    done
-}
-
 quote_re() {
     echo "$1" | sed -e 's/[]\/\\^$*+?.()|[{}-]/\\\0/g'
 }
@@ -46,7 +24,14 @@ device_to_disk_and_partition() {
     echo "$disk $part"
 }
 
+CONFIGDIR=/etc/efi-measured-boot
+
+. "$CONFIGDIR"/config
+. "$APPDIR"/functions
+
 set -e
+
+provision_counter
 
 rootdevinfo=( $(./scripts/get_device_info /) )
 cryptdev=( $(./scripts/get_crypttab_entry ${rootdevinfo[1]}) )
@@ -68,8 +53,24 @@ mkdir -m 0700 -p $(dirname "$LUKS_KEY")
 if [ -e "$LUKS_KEY" ]; then
     echo "Using existing key $LUKS_KEY" 1>&2
 else
-    echo "Generating new key for root partition LUKS header"
+    echo "Generating new key for root partition LUKS header" 1>&2
     (umask 077 && dd if=/dev/urandom of="$LUKS_KEY" bs=128 count=1)
 fi
-echo "You may be prompted to enter an existing LUKS passphrase for your root partition"
+echo "You may be prompted to enter an existing LUKS passphrase for your root partition" 1>&2
 cryptsetup luksAddKey "${cryptdev[1]}" "$LUKS_KEY"
+
+echo "Setting next EFI boot to new entry" 1>&2
+efidevinfo=( $(./scripts/get_device_info /boot/efi) )
+efi_disk_and_part=( $(device_to_disk_and_partition ${efidevinfo[1]}) )
+efidisk=${efi_disk_and_part[0]}
+efipartition=${efi_disk_and_part[1]}
+efipartuuid=$(lsblk -n -o PARTUUID -r "${efidevinfo[1]}" | tr a-z A-Z)
+efientries=( $(efibootmgr -v | grep -i '^Boot[0-9]\+.*'"$(quote_re "$OS_NAME")"' measured boot.*'"$(quote_re "$efipartuuid")" | grep -v OLD | sed -e 's/^Boot//; s/[^0-9].*//') )
+if (( ${#efientries[@]} == 0 )); then
+    echo "Can't find new EFI boot entry" 1>&2
+    exit 1
+fi
+efibootmgr -n "${efientries[0]}"
+
+eco "Installing EFI blobs" 1>&2
+./scripts/emboot_install

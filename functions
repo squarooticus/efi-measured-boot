@@ -65,5 +65,6 @@ unseal_data() {
 
 predict_future_pcrs() {
     path_efi_app=$1
-    $TPM_FUTUREPCRS -L $SEAL_PCRS -H sha256 ${path_efi_app:+--substitute-bsa-unix-path "/boot/efi/EFI/DEBIAN/DEBIAN.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/DEBIAN/DEBIAN_OLD.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/DEBIAN/LINUX.EFI=$path_efi_app"} -o future_pcrs -v
+    os_caps=$(echo -n $OS_SHORT_NAME | tr a-z A-Z)
+    $TPM_FUTUREPCRS -L $SEAL_PCRS -H sha256 ${path_efi_app:+--substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/$os_caps.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/${os_caps}_OLD.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/LINUX.EFI=$path_efi_app"} -o future_pcrs -v
 }

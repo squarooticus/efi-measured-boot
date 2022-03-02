@@ -84,10 +84,10 @@ efipartuuid=$(lsblk -n -o PARTUUID -r "${efidevinfo[1]}" | tr a-z A-Z)
 cp -f initramfs-hooks/efi-measured-boot "$HOOKSDIR/"
 
 mkdir -p "$APPDIR"
-cp -f scripts/get_crypttab_entry scripts/get_device_info scripts/emboot_install scripts/emboot_seal_key emboot_unseal functions "$APPDIR/"
+cp -f scripts/{get_crypttab_entry,get_device_info,emboot_install,emboot_seal_key} emboot_unseal functions "$APPDIR/"
 
 mkdir -p "$BINDIR"
-cp -f scripts/update_emboot "$BINDIR/"
+cp -f scripts/update-emboot "$BINDIR/"
 
 rootdevinfo=( $(./scripts/get_device_info /) )
 cryptdev=( $(./scripts/get_crypttab_entry ${rootdevinfo[1]}) )

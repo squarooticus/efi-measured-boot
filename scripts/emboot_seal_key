@@ -14,7 +14,7 @@ seal_to_efi_app() {
     predict_future_pcrs "$loader"
     seal_data <$LUKS_KEY
     vmlinuz_target=$(basename $(readlink "$kernel"))
-    efi_emboot_dir=$EFI_MOUNT/EFI/debian/emboot/${vmlinuz_target#vmlinuz-}
+    efi_emboot_dir=$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot/${vmlinuz_target#vmlinuz-}
     mkdir -p "$efi_emboot_dir"
     cp -f counter sealed.pub sealed.priv "$efi_emboot_dir"
 }

@@ -9,14 +9,13 @@ install: check
 	@echo "First step complete: check /etc/efi-measured-boot/config and run make step2 when ready" 1>&2
 
 step2: check
-	@. /etc/efi-measured-boot/config && . $$APPDIR/functions && \
-		provision_counter
 	@./scripts/prep_emboot_2
 	@echo "Step two complete: reboot (using your LUKS passphrase when prompted) and run make step3 if successful" 1>&2
 
 step3: check
 	@./scripts/emboot_seal_key
-	@echo "Installation complete: run update_emboot whenever kernel or initrd are updated" 1>&2
+	@echo "Installation complete: run update-emboot whenever kernel or initrd are updated" 1>&2
+	@echo "You will likely also want to change your boot order now to boot the new measured boot entry by default" 1>&2
 
 check: $(addprefix check_,$(CHECKS))
 	@echo "CHECKS SUCCESSFUL" 1>&2
