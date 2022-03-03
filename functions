@@ -17,12 +17,6 @@ umount_efi() {
     fi
 }
 
-provision_counter() {
-    tpm2_nvundefine $COUNTER_HANDLE -Q || true
-    tpm2_nvdefine $COUNTER_HANDLE -C o -s 8 -g sha256 -a 'ownerread|ownerwrite|policywrite|nt=counter'
-    tpm2_nvincrement -C o $COUNTER_HANDLE
-}
-
 increment_counter() {
     tpm2_nvincrement -C o $COUNTER_HANDLE
 }
@@ -33,19 +27,6 @@ read_counter() {
 
 next_counter() {
     printf '%016x' "$((1 + 0x$(read_counter | $XXD -p)))" | $XXD -r -p
-}
-
-create_provision_context() {
-    tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c provision.ctx
-}
-
-seal_data() {
-    tpm2_startauthsession -S session.ctx
-    tpm2_policypcr -S session.ctx -l sha256:$SEAL_PCRS -f future_pcrs
-    tpm2_policynv -S session.ctx -C o -i counter -L policy $COUNTER_HANDLE ule
-    tpm2_create -C provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - -L policy -r sealed.priv -u sealed.pub
-    tpm2_flushcontext session.ctx
-    rm -f session.ctx
 }
 
 unseal_data() {
