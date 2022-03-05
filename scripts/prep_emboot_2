@@ -72,5 +72,5 @@ if (( ${#efientries[@]} == 0 )); then
 fi
 efibootmgr -n "${efientries[0]}"
 
-eco "Installing EFI blobs" 1>&2
+echo "Installing EFI blobs" 1>&2
 ./scripts/emboot_install
