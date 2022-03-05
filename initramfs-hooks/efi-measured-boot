@@ -24,7 +24,7 @@ cp /etc/efi-measured-boot/config "$DESTDIR"/etc/efi-measured-boot/
 
 . /etc/efi-measured-boot/config
 mkdir -p "$DESTDIR/$APPDIR"
-cp "$APPDIR/"functions "$DESTDIR/$APPDIR/"
+cp "$APPDIR"/functions "$DESTDIR/$APPDIR/"
 
 force_load tpm_tis
 force_load tpm_crb

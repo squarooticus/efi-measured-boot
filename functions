@@ -2,6 +2,68 @@
 
 NEED_UMOUNT_EFI=''
 
+provision_counter() {
+    tpm2_nvundefine "$COUNTER_HANDLE" -Q || true
+    tpm2_nvdefine "$COUNTER_HANDLE" -C o -s 8 -g sha256 -a 'ownerread|ownerwrite|policywrite|nt=counter'
+    tpm2_nvincrement -C o "$COUNTER_HANDLE"
+}
+
+create_provision_context() {
+    tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c provision.ctx
+}
+
+predict_future_pcrs() {
+    path_efi_app=$1
+    os_caps=$(echo -n "$OS_SHORT_NAME" | tr a-z A-Z)
+    tpm_futurepcr -L $SEAL_PCRS -H sha256 ${path_efi_app:+--substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/$os_caps.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/${os_caps}_OLD.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/LINUX.EFI=$path_efi_app"} -o future_pcrs -v
+}
+
+create_efi_app() {
+    kernel=$1
+    initrd=$2
+    output=$3
+    objcopy --add-section .osrel="/usr/lib/os-release" --change-section-vma .osrel=0x20000 \
+        --add-section .cmdline="./kernel-command-line.txt" --change-section-vma .cmdline=0x30000 \
+        --add-section .linux="$kernel" --change-section-vma .linux=0x2000000 \
+        --add-section .initrd="$initrd" --change-section-vma .initrd=0x3000000 \
+        /usr/lib/systemd/boot/efi/linuxx64.efi.stub "$output"
+}
+
+setup_tmp_dir() {
+    oldpwd=$(pwd)
+    tmp_dir=$(mktemp -d -t emboot-XXXXXXXXXX)
+    cd "$tmp_dir"
+}
+
+teardown_tmp_dir() {
+    if [ -n "$oldpwd" -a -n "$tmp_dir" ]; then
+        cd "$oldpwd"
+        rm -rf "$tmp_dir"
+        unset tmp_dir oldpwd
+    fi
+}
+
+seal_data() {
+    tpm2_startauthsession -S session.ctx
+    tpm2_policypcr -S session.ctx -l sha256:"$SEAL_PCRS" -f future_pcrs
+    tpm2_policynv -S session.ctx -C o -i counter -L policy "$COUNTER_HANDLE" ule
+    tpm2_create -C provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - -L policy -r sealed.priv -u sealed.pub
+    tpm2_flushcontext session.ctx
+    rm -f session.ctx
+}
+
+seal_to_efi_app() {
+    kernel=$1
+    loader=$2
+    rm -f sealed.pub sealed.priv
+    predict_future_pcrs "$loader"
+    seal_data <$LUKS_KEY
+    vmlinuz_target=$(basename $(readlink "$kernel"))
+    efi_emboot_dir=$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot/${vmlinuz_target#vmlinuz-}
+    mkdir -p "$efi_emboot_dir"
+    cp -f counter sealed.pub sealed.priv "$efi_emboot_dir"
+}
+
 mount_efi() {
     if ! grep -qs "$EFI_MOUNT " /proc/mounts; then
         mkdir -p "$EFI_MOUNT"
@@ -18,11 +80,11 @@ umount_efi() {
 }
 
 increment_counter() {
-    tpm2_nvincrement -C o $COUNTER_HANDLE
+    tpm2_nvincrement -C o "$COUNTER_HANDLE"
 }
 
 read_counter() {
-    tpm2_nvread -C o $COUNTER_HANDLE -s 8
+    tpm2_nvread -C o "$COUNTER_HANDLE" -s 8
 }
 
 next_counter() {
@@ -32,8 +94,8 @@ next_counter() {
 unseal_data() {
     tpm2_load -Q -C provision.ctx -r sealed.priv -u sealed.pub -c load.ctx && \
         tpm2_startauthsession -Q -S session.ctx --policy-session && \
-        tpm2_policypcr -Q -S session.ctx -l sha256:$SEAL_PCRS && \
-        tpm2_policynv -Q -C o -S session.ctx -i counter $COUNTER_HANDLE ule && \
+        tpm2_policypcr -Q -S session.ctx -l sha256:"$SEAL_PCRS" && \
+        tpm2_policynv -Q -C o -S session.ctx -i counter "$COUNTER_HANDLE" ule && \
         tpm2_unseal -Q -c load.ctx -p session:session.ctx
     rc=$?
     if [ -e session.ctx ]; then
@@ -45,6 +107,6 @@ unseal_data() {
 
 predict_future_pcrs() {
     path_efi_app=$1
-    os_caps=$(echo -n $OS_SHORT_NAME | tr a-z A-Z)
-    tpm_futurepcr -L $SEAL_PCRS -H sha256 ${path_efi_app:+--substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/$os_caps.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/${os_caps}_OLD.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/LINUX.EFI=$path_efi_app"} -o future_pcrs -v
+    os_caps=$(echo -n "$OS_SHORT_NAME" | tr a-z A-Z)
+    tpm_futurepcr -L "$SEAL_PCRS" -H sha256 ${path_efi_app:+--substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/$os_caps.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/${os_caps}_OLD.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/LINUX.EFI=$path_efi_app"} -o future_pcrs -v
 }

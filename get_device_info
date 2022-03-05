@@ -1,0 +1,23 @@
+#! /bin/bash
+
+cmd=$0
+trace_path=${1:-/}
+
+exec 3>&1 1>&2
+
+[ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
+if [[ $cmd = ./* ]]; then APPDIR=.; fi
+. "${APPDIR:-.}"/functions
+. "${APPDIR:-.}"/bash_functions
+
+set -e
+
+mount_point=$(stat -c '%m' $trace_path)
+
+dev=( $(lsblk -n -o UUID,PATH,MOUNTPOINT -r | awk '$3 == "'"$mount_point"'" { print $1 " " $2; }') )
+if (( ${#dev[@]} == 0 )); then
+    echo "no block device found with mount point $mount_point" 1>&2
+    exit 1
+fi
+
+echo "${dev[0]} ${dev[1]}" 1>&3
