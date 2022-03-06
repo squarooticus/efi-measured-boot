@@ -1,0 +1,79 @@
+#! /bin/bash
+
+SYSTEMD_STUB=/usr/lib/systemd/boot/efi/linuxx64.efi.stub
+CHECKS=( root arch no_separate_boot mounted_efi root_luks systemd_stub tpm packages )
+
+. ./functions
+. ./bash_functions
+
+check_root() {
+    if test "$(id -u)" != 0; then
+        echo "Must run as root (e.g., using sudo)" 1>&2
+        return 1
+    fi
+}
+
+check_arch() {
+    if test "$(uname -m)" != "x86_64"; then
+        echo "Unsupported architecture $(uname -m)" 1>&2
+        return 1
+    fi
+}
+
+check_no_separate_boot() {
+    if test "$(stat -c '%m' /boot)" != "/"; then
+        echo "/boot not on root device unsupported" 1>&2
+        return 1
+    fi
+}
+
+check_mounted_efi() {
+    if test "$(stat -c '%m' /boot/efi)" != "/boot/efi"; then
+        echo "EFI system partition must be mounted at /boot/efi" 1>&2
+        return 1
+    elif test "$(stat -f -c '%T' /boot/efi)" != "msdos" -o \
+        "$(mount | awk '$3 == "/boot/efi" { print $5; }')" != "vfat"; then
+        echo "Filesystem mounted at /boot/efi must be mounted as type vfat" 1>&2
+        return 1
+    fi
+}
+
+check_root_luks() {
+    cryptdev=( $(./get_crypttab_entry $(./get_device_info / | awk '{print $2;}') ) )
+    if (( ${#cryptdev[@]} == 0 )); then
+        echo "Root has no parent crypttab entry" 1>&2
+        return 1
+    elif [[ ${cryptdev[3]} != *luks* ]]; then
+        echo "crypttab entry missing luks option: ${cryptdev[3]}" 1>&2
+        return 1
+    fi
+}
+
+check_systemd_stub() {
+    if ! test -r "$SYSTEMD_STUB"; then
+        echo "systemd EFI stub $SYSTEMD_STUB not available" 1>&2
+        return 1
+    fi
+}
+
+check_tpm() {
+    if ! tpm2_pcrread -Q 2>/dev/null; then
+        echo "TPM does not appear to be available or working" 1>&2
+        return 1
+    fi
+}
+
+check_packages() {
+    if (( $(dpkg-query -W -f='${Status}\n' initramfs-tools gdisk 2>/dev/null | grep -c "ok installed") < 2 )); then
+        echo "initramfs-tools required (dracut is not supported)" 1>&2
+        return 1
+    fi
+}
+
+set -e
+
+for c in "${CHECKS[@]}"; do
+    echo -n "$c..." 1>&2
+    eval "check_$c"
+    echo "SUCCESS" 1>&2
+done
