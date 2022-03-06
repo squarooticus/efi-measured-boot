@@ -1,14 +1,16 @@
-#! /bin/sh
+#! /bin/bash
 
 cmd=$0
+
+exec 3>&1 1>&2
+
+set -e
 
 [ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
 if [[ $cmd = ./* ]]; then APPDIR=.; fi
 . "${APPDIR:-.}"/functions
 . "${APPDIR:-.}"/bash_functions
 
-set -e
+emboot_kernels=( $(list_emboot_kernel_versions) )
 
-"$APPDIR"/emboot_install
-"$APPDIR"/emboot_seal_key
-"$APPDIR"/emboot_update_efi_apps
+read_emboot_efi_apps

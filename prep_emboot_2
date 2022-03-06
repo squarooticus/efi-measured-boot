@@ -45,7 +45,7 @@ efi_disk_and_part=( $(device_to_disk_and_partition ${efidevinfo[1]}) )
 efidisk=${efi_disk_and_part[0]}
 efipartition=${efi_disk_and_part[1]}
 efipartuuid=$(lsblk -n -o PARTUUID -r "${efidevinfo[1]}" | tr a-z A-Z)
-efientries=( $(efibootmgr -v | grep -i '^Boot[0-9]\+.*'"$(quote_re "$OS_NAME")"' measured boot.*'"$(quote_re "$efipartuuid")" | grep -v OLD | sed -e 's/^Boot//; s/[^0-9].*//') )
+efientries=( $(efibootmgr -v | grep -i '^Boot[0-9]\+.*'"$(quote_re "$OS_NAME")"' measured boot.*'"$(quote_re "$efipartuuid")" | sed -e 's/^Boot//; s/[^0-9].*//') )
 if (( ${#efientries[@]} == 0 )); then
     echo "Can't find new EFI boot entry" 1>&2
     exit 1

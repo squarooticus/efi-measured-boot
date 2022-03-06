@@ -44,9 +44,10 @@ device_to_disk_and_partition() {
     echo "$disk $part"
 }
 
-# Compares two tuple-based, dot-delimited version numbers a and b (possibly
-# with arbitrary string suffixes). Compatible with semantic versioning, but not
-# as strict: comparisons of non-semver strings are undefined.
+# Compares two dot-delimited decimal-element version numbers a and b that may
+# also have arbitrary string suffixes. Compatible with semantic versioning, but
+# not as strict: comparisons of non-semver strings may have unexpected
+# behavior.
 #
 # Returns:
 # 1 if a<b
@@ -60,8 +61,9 @@ compare_versions() {
         return 2
     fi
 
-    # Compare numeric release versions. Supports arbitrary tuple size (not just
-    # X.Y.Z)
+    # Compare numeric release versions. Supports an arbitrary number of numeric
+    # elements (i.e., not just X.Y.Z) in which unspecified indices are regarded
+    # as 0.
     local aver=${1%%[^0-9.]*} bver=${2%%[^0-9.]*}
     local arem=${1#$aver} brem=${2#$bver}
     local IFS=.
@@ -73,6 +75,10 @@ compare_versions() {
             return 3
         fi
     done
+
+    # Remove build metadata before remaining comparison
+    arem=${arem%%+*}
+    brem=${brem%%+*}
 
     # Prelease (w/remainder) always older than release (no remainder)
     if [ -n "$arem" -a -z "$brem" ]; then
@@ -167,4 +173,37 @@ qsort() {
     done
     qsort "$aname" "$compare" $start $j
     qsort "$aname" "$compare" $(( j + 1 )) $end
+}
+
+# Return a space-delimited list of installed emboot kernel versions in reverse
+# order (highest first). Only those with an existing blob are returned.
+list_emboot_kernel_versions() {
+    declare -a kvers
+    shopt -s nullglob
+    for k in "$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot"/*; do
+        if [ -e "$k/linux.efi" ]; then
+            kvers+=( $(basename "$k") )
+        fi
+    done
+
+    kver_descending() {
+        compare_versions "${@%%-[^0-9.-]*}"
+        rc=$?
+        return $(( 4-rc ))
+    }
+
+    qsort kvers kver_descending
+
+    local IFS=" "
+    echo "${kvers[*]}"
+}
+
+declare -A emboot_efi_apps
+
+# Creates an associative array mapping kernel version to boot number (in hex)
+# for all configured emboot EFI entries
+read_emboot_efi_apps() {
+    efidevinfo=( $(./get_device_info $EFI_MOUNT) )
+    efipartuuid=$(lsblk -n -o PARTUUID -r "${efidevinfo[1]}")
+    eval emboot_efi_apps=( $(quote_args $(efibootmgr -v | grep -i '^Boot[0-9a-zA-Z]\+.*'"$(quote_re "$OS_NAME")"' measured boot.*'"$(quote_re "$efipartuuid")"'.*'"$(quote_re "EFI\\$OS_SHORT_NAME\\emboot\\")"'[0-9a-zA-Z.-]\+' | sed -e 's/^Boot\([0-9a-zA-Z]\+\).*'"$(quote_re "EFI\\$OS_SHORT_NAME\\emboot\\")"'\([0-9a-zA-Z.-]\+\).*/\2 \1/i' | tr a-z A-Z) ) )
 }
