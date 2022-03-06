@@ -2,39 +2,16 @@
 
 exec 3>&1 1>&2
 
-quote_re() {
-    echo "$1" | sed -e 's/[]\/\\^$*+?.()|[{}-]/\\\0/g'
-}
-
-device_to_disk_and_partition() {
-    dev=$1
-    devpartuuid=$(lsblk -n -o PARTUUID -r "$dev" | tr a-z A-Z)
-    parents=( $(lsblk -s -n -o NAME -r "$dev" | tail -n +2) )
-    if (( ${#parents[@]} != 1 )); then
-        echo "Don't know how to handle $dev with more than one parent: ${parents[*]}" 1>&2
-        exit 1
-    fi
-    disk=/dev/${parents[0]}
-    part=$(echo "$dev" | grep -o '[0-9]\+$')
-    checkuuid=$(sgdisk "$disk" -i "$part" | grep -i 'Partition unique GUID' | sed 's/^.*://; s/[[:space:]]\+//g' | tr a-z A-Z)
-    if [[ "$devpartuuid" != "$checkuuid" ]]; then
-        echo "$dev somehow not $disk partition $part: PARTUUID mismatch ($devpartuuid vs $checkuuid)" 1>&2
-        exit 1
-    fi
-    echo "$disk $part"
-}
-
-CONFIGDIR=/etc/efi-measured-boot
-
-. "$CONFIGDIR"/config
-. "$APPDIR"/functions
+. /etc/efi-measured-boot/config
+. ./functions
+. ./bash_functions
 
 set -e
 
 provision_counter
 
-rootdevinfo=( $(./scripts/get_device_info /) )
-cryptdev=( $(./scripts/get_crypttab_entry ${rootdevinfo[1]}) )
+rootdevinfo=( $(./get_device_info /) )
+cryptdev=( $(./get_crypttab_entry ${rootdevinfo[1]}) )
 
 ### BREAKING CHANGES BEGIN HERE
 
@@ -60,7 +37,7 @@ echo "You may be prompted to enter an existing LUKS passphrase for your root par
 cryptsetup luksAddKey "${cryptdev[1]}" "$LUKS_KEY"
 
 echo "Setting next EFI boot to new entry" 1>&2
-efidevinfo=( $(./scripts/get_device_info /boot/efi) )
+efidevinfo=( $(./get_device_info /boot/efi) )
 efi_disk_and_part=( $(device_to_disk_and_partition ${efidevinfo[1]}) )
 efidisk=${efi_disk_and_part[0]}
 efipartition=${efi_disk_and_part[1]}
@@ -73,4 +50,4 @@ fi
 efibootmgr -n "${efientries[0]}"
 
 echo "Installing EFI blobs" 1>&2
-./scripts/emboot_install
+./emboot_install

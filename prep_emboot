@@ -3,6 +3,7 @@
 exec 3>&1 1>&2
 
 . ./functions
+. ./bash_functions
 
 remove_keyscript_option() {
     local IFS=','
@@ -21,47 +22,8 @@ add_keyscript_option() {
     local IFS=','
     declare -a work
     work=( $1 )
-    work+=( "keyscript=$APPDIR/emboot_unseal" )
+    work+=( "keyscript=$APPDIR/emboot_unseal.sh" )
     echo "${work[*]}"
-}
-
-quote_args() {
-    sq="'"
-    dq='"'
-    fs=/
-    space=""
-    for w; do
-        if [ -n "$w" -a -z "${w//[0-9a-zA-Z_,.:=$fs-]}" ]; then
-            echo -n "$space$w"
-        else
-            qw="'${w//$sq/$sq$dq$sq$dq$sq}'"
-            qw=${qw//$sq$sq}
-            echo -n "$space${qw:-$sq$sq}"
-        fi
-        space=" "
-    done
-}
-
-quote_re() {
-    echo "$1" | sed -e 's/[]\/\\^$*+?.()|[{}-]/\\\0/g'
-}
-
-device_to_disk_and_partition() {
-    dev=$1
-    devpartuuid=$(lsblk -n -o PARTUUID -r "$dev" | tr a-z A-Z)
-    parents=( $(lsblk -s -n -o NAME -r "$dev" | tail -n +2) )
-    if (( ${#parents[@]} != 1 )); then
-        echo "Don't know how to handle $dev with more than one parent: ${parents[*]}" 1>&2
-        exit 1
-    fi
-    disk=/dev/${parents[0]}
-    part=$(echo "$dev" | grep -o '[0-9]\+$')
-    checkuuid=$(sgdisk "$disk" -i "$part" | grep -i 'Partition unique GUID' | sed 's/^.*://; s/[[:space:]]\+//g' | tr a-z A-Z)
-    if [[ "$devpartuuid" != "$checkuuid" ]]; then
-        echo "$dev somehow not $disk partition $part: PARTUUID mismatch ($devpartuuid vs $checkuuid)" 1>&2
-        exit 1
-    fi
-    echo "$disk $part"
 }
 
 CONFIGDIR=/etc/efi-measured-boot
@@ -75,24 +37,25 @@ set -e
 OS_NAME=$NAME
 OS_SHORT_NAME=$ID
 
-efidevinfo=( $(./scripts/get_device_info /boot/efi) )
+efidevinfo=( $(./get_device_info /boot/efi) )
 efi_disk_and_part=( $(device_to_disk_and_partition ${efidevinfo[1]}) )
 efidisk=${efi_disk_and_part[0]}
 efipartition=${efi_disk_and_part[1]}
 efipartuuid=$(lsblk -n -o PARTUUID -r "${efidevinfo[1]}" | tr a-z A-Z)
 
+test -e "$HOOKSDIR"
 cp -f initramfs-hooks/efi-measured-boot "$HOOKSDIR/"
 
 mkdir -p "$APPDIR"
-cp -f scripts/{get_crypttab_entry,get_device_info,emboot_install,emboot_seal_key} emboot_unseal functions "$APPDIR/"
+cp -f bash_functions emboot_install emboot_seal_key emboot_unseal.sh functions get_crypttab_entry get_device_info "$APPDIR/"
 
 mkdir -p "$BINDIR"
-cp -f scripts/update-emboot "$BINDIR/"
+cp -f update-emboot "$BINDIR/"
 
 (cd tpm_futurepcr && pip3 install .)
 
-rootdevinfo=( $(./scripts/get_device_info /) )
-cryptdev=( $(./scripts/get_crypttab_entry ${rootdevinfo[1]}) )
+rootdevinfo=( $(./get_device_info /) )
+cryptdev=( $(./get_crypttab_entry ${rootdevinfo[1]}) )
 
 cryptopts=${cryptdev[3]}
 if [[ $cryptopts != *luks* ]]; then
@@ -116,11 +79,11 @@ revert_changes() {
         mv -f /etc/crypttab.pre_emboot /etc/crypttab
     fi
     rm -f "$cfgfile.new"
-    efientries=( $(efibootmgr -v | grep -i '^Boot[0-9]\+.*'"$(quote_re "$OS_NAME")"' measured boot.*'"$(quote_re "$efipartuuid")" | sed -e 's/^Boot//; s/[^0-9].*//') )
-    for i in "${efientries[@]}"; do
-        echo "removing EFI boot entry $i" 1>&2
-        efibootmgr -B -b $i
-    done
+#    efientries=( $(efibootmgr -v | grep -i '^Boot[0-9]\+.*'"$(quote_re "$OS_NAME")"' measured boot.*'"$(quote_re "$efipartuuid")" | sed -e 's/^Boot//; s/[^0-9].*//') )
+#    for i in "${efientries[@]}"; do
+#        echo "removing EFI boot entry $i" 1>&2
+#        efibootmgr -B -b $i
+#    done
 }
 
 trap revert_changes INT TERM ERR
@@ -151,11 +114,11 @@ cat /etc/crypttab | awk -v newopts="$cryptopts" '$1 == "'"${cryptdev[0]}"'" && $
 mv -f /etc/crypttab /etc/crypttab.pre_emboot
 mv -f /etc/crypttab.new /etc/crypttab
 
-# Add UEFI boot entries
-echo "Adding EFI boot entries"
-main_loader=$(echo "\\EFI\\$OS_SHORT_NAME\\$OS_SHORT_NAME.EFI" | tr a-z A-Z)
-old_loader=$(echo "\\EFI\\$OS_SHORT_NAME\\${OS_SHORT_NAME}_OLD.EFI" | tr a-z A-Z)
-efibootmgr -C -d "${efidisk}" -p "${efipartition}" -l "$main_loader" -L "${OS_NAME} measured boot"
-efibootmgr -C -d "${efidisk}" -p "${efipartition}" -l "$old_loader" -L "${OS_NAME} measured boot (OLD)"
+## Add UEFI boot entries
+#echo "Adding EFI boot entries"
+#main_loader=$(echo "\\EFI\\$OS_SHORT_NAME\\$OS_SHORT_NAME.EFI" | tr a-z A-Z)
+#old_loader=$(echo "\\EFI\\$OS_SHORT_NAME\\${OS_SHORT_NAME}_OLD.EFI" | tr a-z A-Z)
+#efibootmgr -C -d "${efidisk}" -p "${efipartition}" -l "$main_loader" -L "${OS_NAME} measured boot"
+#efibootmgr -C -d "${efidisk}" -p "${efipartition}" -l "$old_loader" -L "${OS_NAME} measured boot (OLD)"
 
 exit 0
