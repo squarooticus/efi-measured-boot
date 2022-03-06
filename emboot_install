@@ -1,16 +1,20 @@
 #! /bin/bash
 
+cmd=$0
+
 exec 3>&1 1>&2
 
 set -e
 
-. /etc/efi-measured-boot/config
-. "$APPDIR"/functions
+[ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
+if [[ $cmd = ./* ]]; then APPDIR=.; fi
+. "${APPDIR:-.}"/functions
+. "${APPDIR:-.}"/bash_functions
 
-setup_tmp_dir
+TMPDIR=$(setup_tmp_dir)
 
 cleanup() {
-    teardown_tmp_dir
+    [ -n "$TMPDIR" ] && rm -rf "$TMPDIR"
 }
 
 trap cleanup EXIT
@@ -19,22 +23,21 @@ rootdev=( $("$APPDIR"/get_device_info /) )
 cryptdev=( $("$APPDIR"/get_crypttab_entry "${rootdev[1]}") )
 
 if [[ ${cryptdev[3]} != *luks* ]]; then
-    echo 'crypttab entry missing luks option'
-    echo "${cryptdev[3]}"
+    echo "crypttab entry missing luks option: ${cryptdev[3]}"
     exit 1
 fi
 
 if [[ ${cryptdev[3]} != *keyscript=*emboot_unseal* ]]; then
-    echo 'keyscript option in crypttab entry missing or invalid'
-    echo "${cryptdev[3]}"
+    echo "keyscript option in crypttab entry missing or invalid: ${cryptdev[3]}"
     exit 1
 fi
 
-echo "root=UUID=${rootdev[0]} cryptdevice=${cryptdev[1]}:${cryptdev[0]} $KERNEL_PARAMS" >./kernel-command-line.txt
+echo "root=UUID=${rootdev[0]} cryptdevice=${cryptdev[1]}:${cryptdev[0]} $KERNEL_PARAMS" >"$TMPDIR"/kernel-command-line.txt
 
-main_loader="$EFI_MOUNT"/"$(echo "EFI/$OS_SHORT_NAME/$OS_SHORT_NAME.EFI" | tr a-z A-Z)"
-old_loader="$EFI_MOUNT"/"$(echo "EFI/$OS_SHORT_NAME/${OS_SHORT_NAME}_OLD.EFI" | tr a-z A-Z)"
-create_efi_app /vmlinuz /initrd.img "$main_loader"
-create_efi_app /vmlinuz.old /initrd.img.old "$old_loader"
+for kernel in ${@:-/boot/vmlinuz-*}; do
+    kfn=$(basename "$kernel")
+    krel=${kfn#vmlinuz-}
+    create_efi_app "$kernel" /boot/initrd.img-"$krel" "$TMPDIR"/kernel-command-line.txt "$(emboot_kernel_dir "$krel")/linux.efi"
+done
 
 exit 0
