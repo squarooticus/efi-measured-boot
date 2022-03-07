@@ -23,7 +23,7 @@ umount_efi() {
 
 provision_counter() {
     tpm2_nvundefine "$COUNTER_HANDLE" -Q || true
-    tpm2_nvdefine "$COUNTER_HANDLE" -C o -s 8 -g sha256 -a 'ownerread|ownerwrite|policywrite|nt=counter'
+    tpm2_nvdefine "$COUNTER_HANDLE" -C o -s 8 -a 'ownerread|ownerwrite|policywrite|nt=counter'
     tpm2_nvincrement -C o "$COUNTER_HANDLE"
 }
 
@@ -62,7 +62,7 @@ create_efi_app() {
         --add-section .cmdline="$kcli" --change-section-vma .cmdline=0x30000 \
         --add-section .linux="$kernel" --change-section-vma .linux=0x2000000 \
         --add-section .initrd="$initrd" --change-section-vma .initrd=0x3000000 \
-        /usr/lib/systemd/boot/efi/linuxx64.efi.stub ./linux.efi
+        /usr/lib/systemd/boot/efi/linuxx64.efi.stub "$output"
 }
 
 predict_future_pcrs() {
