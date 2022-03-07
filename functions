@@ -83,7 +83,6 @@ seal_data() {
     tpm2_create -C "$workdir"/provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - \
         -L "$workdir"/policy -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub
     tpm2_flushcontext "$workdir"/session.ctx
-    ls -la "$workdir" 1>&2
     rm -f "$workdir"/session.ctx
 }
 
