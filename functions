@@ -1,5 +1,9 @@
 #! /bin/sh
 
+setup_tmp_dir() {
+    mktemp -d -t emboot-XXXXXXXXXX
+}
+
 NEED_UMOUNT_EFI=''
 
 mount_efi() {
@@ -18,17 +22,17 @@ umount_efi() {
 }
 
 provision_counter() {
-    tpm2_nvundefine $COUNTER_HANDLE -Q || true
-    tpm2_nvdefine $COUNTER_HANDLE -C o -s 8 -g sha256 -a 'ownerread|ownerwrite|policywrite|nt=counter'
-    tpm2_nvincrement -C o $COUNTER_HANDLE
+    tpm2_nvundefine "$COUNTER_HANDLE" -Q || true
+    tpm2_nvdefine "$COUNTER_HANDLE" -C o -s 8 -g sha256 -a 'ownerread|ownerwrite|policywrite|nt=counter'
+    tpm2_nvincrement -C o "$COUNTER_HANDLE"
 }
 
 increment_counter() {
-    tpm2_nvincrement -C o $COUNTER_HANDLE
+    tpm2_nvincrement -C o "$COUNTER_HANDLE"
 }
 
 read_counter() {
-    tpm2_nvread -C o $COUNTER_HANDLE -s 8
+    tpm2_nvread -C o "$COUNTER_HANDLE" -s 8
 }
 
 next_counter() {
@@ -36,34 +40,73 @@ next_counter() {
 }
 
 create_provision_context() {
-    tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c provision.ctx
-}
-
-seal_data() {
-    tpm2_startauthsession -S session.ctx
-    tpm2_policypcr -S session.ctx -l sha256:$SEAL_PCRS -f future_pcrs
-    tpm2_policynv -S session.ctx -C o -i counter -L policy $COUNTER_HANDLE ule
-    tpm2_create -C provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - -L policy -r sealed.priv -u sealed.pub
-    tpm2_flushcontext session.ctx
-    rm -f session.ctx
-}
-
-unseal_data() {
-    tpm2_load -Q -C provision.ctx -r sealed.priv -u sealed.pub -c load.ctx && \
-        tpm2_startauthsession -Q -S session.ctx --policy-session && \
-        tpm2_policypcr -Q -S session.ctx -l sha256:$SEAL_PCRS && \
-        tpm2_policynv -Q -C o -S session.ctx -i counter $COUNTER_HANDLE ule && \
-        tpm2_unseal -Q -c load.ctx -p session:session.ctx
-    rc=$?
-    if [ -e session.ctx ]; then
-        tpm2_flushcontext -Q session.ctx
-    fi
-    rm -f load.ctx session.ctx
-    return $rc
+    tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "${1:-.}"/provision.ctx
 }
 
 predict_future_pcrs() {
     path_efi_app=$1
-    os_caps=$(echo -n $OS_SHORT_NAME | tr a-z A-Z)
+    os_caps=$(echo -n "$OS_SHORT_NAME" | tr a-z A-Z)
     tpm_futurepcr -L $SEAL_PCRS -H sha256 ${path_efi_app:+--substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/$os_caps.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/${os_caps}_OLD.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/LINUX.EFI=$path_efi_app"} -o future_pcrs -v
+}
+
+emboot_kernel_dir() {
+    echo "$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot/${1:-$(uname -r)}"
+}
+
+create_efi_app() {
+    kernel=$1
+    initrd=$2
+    kcli=$3
+    output=$4
+    objcopy --add-section .osrel="/usr/lib/os-release" --change-section-vma .osrel=0x20000 \
+        --add-section .cmdline="$kcli" --change-section-vma .cmdline=0x30000 \
+        --add-section .linux="$kernel" --change-section-vma .linux=0x2000000 \
+        --add-section .initrd="$initrd" --change-section-vma .initrd=0x3000000 \
+        /usr/lib/systemd/boot/efi/linuxx64.efi.stub ./linux.efi
+}
+
+predict_future_pcrs() {
+    workdir=${1:-.}
+    substitute_efi_app=$2
+    tpm_futurepcr -L "$SEAL_PCRS" -H sha256 \
+        ${substitute_efi_app:+--substitute-bsa-unix-path "$(emboot_kernel_dir)/linux.efi=$substitute_efi_app"} \
+        -o "$workdir"/future_pcrs \
+        -v
+}
+
+seal_data() {
+    workdir=${1:-.}
+    tpm2_startauthsession -S "$workdir"/session.ctx
+    tpm2_policypcr -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/future_pcrs
+    tpm2_policynv -S "$workdir"/session.ctx -C o -i "$workdir"/counter -L "$workdir"/policy "$COUNTER_HANDLE" ule
+    tpm2_create -C "$workdir"/provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - \
+        -L "$workdir"/policy -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub
+    tpm2_flushcontext "$workdir"/session.ctx
+    rm -f "$workdir"/session.ctx
+}
+
+seal_to_efi_app() {
+    workdir=${1:-.}
+    loader=$2
+    rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
+    predict_future_pcrs "$workdir" "$loader"
+    seal_data "$workdir" <$LUKS_KEY
+    mkdir -p "$(dirname "$loader")"
+    cp -f "$workdir"/counter "$workdir"/sealed.pub "$workdir"/sealed.priv "$(dirname "$loader")"/
+}
+
+unseal_data() {
+    workdir=${1:-.}
+    tpm2_load -Q -C "$workdir"/provision.ctx \
+            -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub -c "$workdir"/load.ctx && \
+        tpm2_startauthsession -Q -S "$workdir"/session.ctx --policy-session && \
+        tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" && \
+        tpm2_policynv -Q -C o -S "$workdir"/session.ctx -i "$workdir"/counter "$COUNTER_HANDLE" ule && \
+        tpm2_unseal -Q -c "$workdir"/load.ctx -p session:"$workdir"/session.ctx
+    rc=$?
+    if [ -e "$workdir"/session.ctx ]; then
+        tpm2_flushcontext -Q "$workdir"/session.ctx
+    fi
+    rm -f "$workdir"/load.ctx "$workdir"/session.ctx
+    return $rc
 }

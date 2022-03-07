@@ -1,0 +1,14 @@
+#! /bin/bash
+
+cmd=$0
+
+[ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
+if [[ $cmd = ./* ]]; then APPDIR=.; fi
+. "${APPDIR:-.}"/functions
+. "${APPDIR:-.}"/bash_functions
+
+set -e
+
+"$APPDIR"/emboot_install
+"$APPDIR"/emboot_update_efi_apps
+"$APPDIR"/emboot_seal_key

@@ -1,0 +1,46 @@
+#! /bin/bash
+
+cmd=$0
+
+exec 3>&1 1>&2
+
+[ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
+if [[ $cmd = ./* ]]; then APPDIR=.; fi
+. "${APPDIR:-.}"/functions
+. "${APPDIR:-.}"/bash_functions
+
+set -e
+
+TMPDIR=$(setup_tmp_dir)
+
+cleanup() {
+    [ -n "$TMPDIR" ] && rm -rf "$TMPDIR"
+}
+
+trap cleanup EXIT
+
+rootdev=( $("$APPDIR"/get_device_info /) )
+cryptdev=( $("$APPDIR"/get_crypttab_entry "${rootdev[1]}") )
+
+if [[ ${cryptdev[3]} != *luks* ]]; then
+    echo "crypttab entry missing luks option: ${cryptdev[3]}"
+    exit 1
+fi
+
+if [[ ${cryptdev[3]} != *keyscript=*emboot_unseal* ]]; then
+    echo "keyscript option in crypttab entry missing or invalid: ${cryptdev[3]}"
+    exit 1
+fi
+
+echo "root=UUID=${rootdev[0]} cryptdevice=${cryptdev[1]}:${cryptdev[0]} $KERNEL_PARAMS" >"$TMPDIR"/kernel-command-line.txt
+
+for kernel in ${@:-/boot/vmlinuz-*}; do
+    kfn=$(basename "$kernel")
+    krel=${kfn#vmlinuz-}
+    kefipath=$(emboot_kernel_dir "$krel")
+    create_efi_app "$kernel" /boot/initrd.img-"$krel" "$TMPDIR"/kernel-command-line.txt "$TMPDIR"/linux.efi
+    mkdir -p "$kefipath"
+    cp -f "$TMPDIR"/linux.efi "$kefipath"/linux.efi
+done
+
+exit 0

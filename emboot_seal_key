@@ -1,0 +1,29 @@
+#! /bin/bash
+
+cmd=$0
+
+exec 3>&1 1>&2
+
+[ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
+if [[ $cmd = ./* ]]; then APPDIR=.; fi
+. "${APPDIR:-.}"/functions
+. "${APPDIR:-.}"/bash_functions
+
+set -e
+
+TMPDIR=$(setup_tmp_dir)
+
+cleanup() {
+    [ -n "$TMPDIR" ] && rm -rf "$TMPDIR"
+}
+
+trap cleanup EXIT
+
+read_counter >"$TMPDIR"/counter
+create_provision_context "$TMPDIR"
+
+for loader in ${@:-$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot/*/linux.efi}; do
+    seal_to_efi_app "$TMPDIR" "$loader"
+done
+
+exit 0
