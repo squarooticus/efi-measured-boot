@@ -63,8 +63,6 @@ create_efi_app() {
         --add-section .linux="$kernel" --change-section-vma .linux=0x2000000 \
         --add-section .initrd="$initrd" --change-section-vma .initrd=0x3000000 \
         /usr/lib/systemd/boot/efi/linuxx64.efi.stub ./linux.efi
-    mkdir -p $(dirname "$output")
-    cp -f linux.efi "$output"
 }
 
 predict_future_pcrs() {

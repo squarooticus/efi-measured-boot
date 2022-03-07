@@ -37,7 +37,10 @@ echo "root=UUID=${rootdev[0]} cryptdevice=${cryptdev[1]}:${cryptdev[0]} $KERNEL_
 for kernel in ${@:-/boot/vmlinuz-*}; do
     kfn=$(basename "$kernel")
     krel=${kfn#vmlinuz-}
-    create_efi_app "$kernel" /boot/initrd.img-"$krel" "$TMPDIR"/kernel-command-line.txt "$(emboot_kernel_dir "$krel")/linux.efi"
+    kefipath=$(emboot_kernel_dir "$krel")
+    create_efi_app "$kernel" /boot/initrd.img-"$krel" "$TMPDIR"/kernel-command-line.txt "$TMPDIR"/linux.efi
+    mkdir -p "$kefipath"
+    cp -f "$TMPDIR"/linux.efi "$kefipath"/linux.efi
 done
 
 exit 0
