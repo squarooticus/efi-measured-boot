@@ -43,7 +43,7 @@ test -e "$HOOKSDIR"
 cp -f initramfs-hooks/efi-measured-boot "$HOOKSDIR/"
 
 mkdir -p "$APPDIR"
-cp -f bash_functions emboot_install emboot_seal_key emboot_unseal.sh functions get_crypttab_entry get_device_info "$APPDIR/"
+cp -f bash_functions emboot_install emboot_seal_key emboot_unseal.sh emboot_update_efi_apps functions get_crypttab_entry get_device_info "$APPDIR/"
 
 mkdir -p "$BINDIR"
 cp -f update-emboot "$BINDIR/"
