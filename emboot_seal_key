@@ -4,12 +4,12 @@ cmd=$0
 
 exec 3>&1 1>&2
 
-set -e
-
 [ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
 if [[ $cmd = ./* ]]; then APPDIR=.; fi
 . "${APPDIR:-.}"/functions
 . "${APPDIR:-.}"/bash_functions
+
+set -e
 
 TMPDIR=$(setup_tmp_dir)
 

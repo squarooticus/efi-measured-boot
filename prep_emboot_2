@@ -39,18 +39,18 @@ fi
 echo "You may be prompted to enter an existing LUKS passphrase for your root partition" 1>&2
 cryptsetup luksAddKey "${cryptdev[1]}" "$LUKS_KEY"
 
-echo "Setting next EFI boot to new entry" 1>&2
-efidevinfo=( $(./get_device_info /boot/efi) )
-efi_disk_and_part=( $(device_to_disk_and_partition ${efidevinfo[1]}) )
-efidisk=${efi_disk_and_part[0]}
-efipartition=${efi_disk_and_part[1]}
-efipartuuid=$(lsblk -n -o PARTUUID -r "${efidevinfo[1]}" | tr a-z A-Z)
-efientries=( $(efibootmgr -v | grep -i '^Boot[0-9]\+.*'"$(quote_re "$OS_NAME")"' measured boot.*'"$(quote_re "$efipartuuid")" | sed -e 's/^Boot//; s/[^0-9].*//') )
-if (( ${#efientries[@]} == 0 )); then
-    echo "Can't find new EFI boot entry" 1>&2
-    exit 1
-fi
-efibootmgr -n "${efientries[0]}"
-
 echo "Installing EFI blobs" 1>&2
 ./emboot_install
+
+echo "Adding EFI boot entries" 1>&2
+./emboot_update_efi_apps
+
+echo "Setting next EFI boot to latest emboot kernel blob" 1>&2
+./read_emboot_efi_apps
+if (( ${#emboot_efi_apps[@]} == 0 )); then
+    echo "Can't find any emboot EFI boot entries" 1>&2
+    exit 1
+fi
+efibootmgr -n "${emboot_efi_apps[0]}"
+
+exit 0

@@ -4,13 +4,29 @@ cmd=$0
 
 exec 3>&1 1>&2
 
-set -e
-
 [ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
 if [[ $cmd = ./* ]]; then APPDIR=.; fi
 . "${APPDIR:-.}"/functions
 . "${APPDIR:-.}"/bash_functions
 
+set -e
+
 emboot_kernels=( $(list_emboot_kernel_versions) )
 
 read_emboot_efi_apps
+
+declare -a emboot_efi_order
+
+for k in "${emboot_kernels[@]}"; do
+    kup=$(echo "$k" | tr a-z A-Z)
+    bootnum=${emboot_efi_apps[$kup]}
+    if [[ -n "$bootnum" ]]; then
+        echo "Existing EFI app entry $bootnum for $k"
+        emboot_efi_order+=( $bootnum )
+    else
+        echo "Creating EFI app entry for $k"
+        create_emboot_efi_app "$k"
+    fi
+done
+
+exit 0

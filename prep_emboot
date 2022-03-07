@@ -38,10 +38,6 @@ OS_NAME=$NAME
 OS_SHORT_NAME=$ID
 
 efidevinfo=( $(./get_device_info /boot/efi) )
-efi_disk_and_part=( $(device_to_disk_and_partition ${efidevinfo[1]}) )
-efidisk=${efi_disk_and_part[0]}
-efipartition=${efi_disk_and_part[1]}
-efipartuuid=$(lsblk -n -o PARTUUID -r "${efidevinfo[1]}" | tr a-z A-Z)
 
 test -e "$HOOKSDIR"
 cp -f initramfs-hooks/efi-measured-boot "$HOOKSDIR/"
@@ -79,11 +75,6 @@ revert_changes() {
         mv -f /etc/crypttab.pre_emboot /etc/crypttab
     fi
     rm -f "$cfgfile.new"
-#    efientries=( $(efibootmgr -v | grep -i '^Boot[0-9]\+.*'"$(quote_re "$OS_NAME")"' measured boot.*'"$(quote_re "$efipartuuid")" | sed -e 's/^Boot//; s/[^0-9].*//') )
-#    for i in "${efientries[@]}"; do
-#        echo "removing EFI boot entry $i" 1>&2
-#        efibootmgr -B -b $i
-#    done
 }
 
 trap revert_changes INT TERM ERR
@@ -113,12 +104,5 @@ echo "Modifying crypttab"
 cat /etc/crypttab | awk -v newopts="$cryptopts" '$1 == "'"${cryptdev[0]}"'" && $2 == "'"${cryptdev[1]}"'" { print "#" $0; print $1 " " $2 " " $3 " " newopts; next; }  { print $0; }' >/etc/crypttab.new
 mv -f /etc/crypttab /etc/crypttab.pre_emboot
 mv -f /etc/crypttab.new /etc/crypttab
-
-## Add UEFI boot entries
-#echo "Adding EFI boot entries"
-#main_loader=$(echo "\\EFI\\$OS_SHORT_NAME\\$OS_SHORT_NAME.EFI" | tr a-z A-Z)
-#old_loader=$(echo "\\EFI\\$OS_SHORT_NAME\\${OS_SHORT_NAME}_OLD.EFI" | tr a-z A-Z)
-#efibootmgr -C -d "${efidisk}" -p "${efipartition}" -l "$main_loader" -L "${OS_NAME} measured boot"
-#efibootmgr -C -d "${efidisk}" -p "${efipartition}" -l "$old_loader" -L "${OS_NAME} measured boot (OLD)"
 
 exit 0

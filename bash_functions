@@ -207,3 +207,13 @@ read_emboot_efi_apps() {
     efipartuuid=$(lsblk -n -o PARTUUID -r "${efidevinfo[1]}")
     eval emboot_efi_apps=( $(quote_args $(efibootmgr -v | grep -i '^Boot[0-9a-zA-Z]\+.*'"$(quote_re "$OS_NAME")"' measured boot.*'"$(quote_re "$efipartuuid")"'.*'"$(quote_re "EFI\\$OS_SHORT_NAME\\emboot\\")"'[0-9a-zA-Z.-]\+' | sed -e 's/^Boot\([0-9a-zA-Z]\+\).*'"$(quote_re "EFI\\$OS_SHORT_NAME\\emboot\\")"'\([0-9a-zA-Z.-]\+\).*/\2 \1/i' | tr a-z A-Z) ) )
 }
+
+create_emboot_efi_app() {
+    local kver=$1
+    efidevinfo=( $(./get_device_info "$EFI_MOUNT") )
+    efi_disk_and_part=( $(device_to_disk_and_partition "${efidevinfo[1]}") )
+    efidisk=${efi_disk_and_part[0]}
+    efipartition=${efi_disk_and_part[1]}
+    loader="\\EFI\\$OS_SHORT_NAME\\emboot\\$kver\\linux.efi"
+    efibootmgr -C -d "${efidisk}" -p "${efipartition}" -l "$loader" -L "${OS_NAME} measured boot ($kver)"
+}
