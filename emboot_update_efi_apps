@@ -11,21 +11,17 @@ if [[ $cmd = ./* ]]; then APPDIR=.; fi
 
 set -e
 
-emboot_kernels=( $(list_emboot_kernel_versions) )
+read_efi_apps
 
-read_emboot_efi_apps
-
-declare -a emboot_efi_order
-
-for k in "${emboot_kernels[@]}"; do
-    kup=$(echo "$k" | tr a-z A-Z)
-    bootnum=${emboot_efi_apps[$kup]}
-    if [[ -n "$bootnum" ]]; then
-        echo "Existing EFI app entry $bootnum for $k"
-        emboot_efi_order+=( $bootnum )
+for lbn in emboot.efi emboot_old.efi; do
+    loaderup=$(emboot_loader_path $lbn | tr a-z A-Z)
+    oldIFS=$IFS; IFS=$'\t'; entry=( ${efi_apps[$loaderup]} ); IFS=$oldIFS
+    if [[ -n "${entry[0]}" ]]; then
+        echo "Existing EFI boot loader entry ${entry[0]} for $lbn" 1>&2
     else
-        echo "Creating EFI app entry for $k"
-        create_emboot_efi_app "$k"
+        tag=$(echo -n "$lbn" | grep '_[^.]' | sed -e 's/^[^_]*_\([^.]\+\).*/\1/')
+        echo "Creating EFI boot loader entry for $lbn${tag:+ with tag $tag}" 1>&2
+        create_emboot_efi_app "$lbn" "$tag"
     fi
 done
 

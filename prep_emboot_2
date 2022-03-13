@@ -46,16 +46,10 @@ echo "Adding EFI boot entries" 1>&2
 ./emboot_update_efi_apps
 
 echo "Setting next EFI boot to latest emboot kernel blob" 1>&2
-kvers=( $(list_emboot_kernel_versions) )
-if (( ${#kvers[@]} == 0 )); then
-    echo "Can't find any emboot kernel blobs" 1>&2
-    exit 1
-fi
-pk=${kvers[0]}
-read_emboot_efi_apps
-bn=${emboot_efi_apps[$(echo -n "$pk" | tr a-z A-Z)]}
+read_efi_apps
+bn=${efi_apps[$(emboot_loader_path)]}
 if [ -z "$bn" ]; then
-    echo "Can't find emboot EFI boot entry for kernel $pk" 1>&2
+    echo "Can't find emboot EFI boot entry for $(emboot_loader_path)" 1>&2
     exit 1
 fi
 efibootmgr -n "$bn"

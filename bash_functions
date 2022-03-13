@@ -175,18 +175,16 @@ qsort() {
     qsort "$aname" "$compare" $(( j + 1 )) $end
 }
 
-# Return a space-delimited list of installed emboot kernel versions in reverse
-# order (highest first). Only those with an existing blob are returned.
-list_emboot_kernel_versions() {
+# Return a space-delimited list of kernel images in /boot in reverse order
+# (highest first).
+list_installed_kernels() {
     declare -a kvers
     shopt -s nullglob
-    for k in "$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot"/*; do
-        if [ -e "$k/linux.efi" ]; then
-            kvers+=( $(basename "$k") )
-        fi
-    done
+    kvers=( /boot/vmlinuz* )
 
     kver_descending() {
+        vers=( "${@%%-[^0-9.-]*}" )
+        vers=( "${vers[@]##*/vmlinuz-}" )
         compare_versions "${@%%-[^0-9.-]*}"
         rc=$?
         return $(( 4-rc ))
@@ -198,22 +196,23 @@ list_emboot_kernel_versions() {
     echo "${kvers[*]}"
 }
 
-declare -A emboot_efi_apps
-
-# Creates an associative array mapping kernel version to boot number (in hex)
-# for all configured emboot EFI entries
-read_emboot_efi_apps() {
-    efidevinfo=( $("$APPDIR"/get_device_info "$EFI_MOUNT") )
-    efipartuuid=$(lsblk -n -o PARTUUID -r "${efidevinfo[1]}")
-    eval emboot_efi_apps=( $(quote_args $(efibootmgr -v | grep -i '^Boot[0-9a-zA-Z]\+.*'"$(quote_re "$OS_NAME")"' measured boot.*'"$(quote_re "$efipartuuid")"'.*'"$(quote_re "EFI\\$OS_SHORT_NAME\\emboot\\")"'[0-9a-zA-Z.-]\+' | sed -e 's/^Boot\([0-9a-zA-Z]\+\).*'"$(quote_re "EFI\\$OS_SHORT_NAME\\emboot\\")"'\([0-9a-zA-Z.-]\+\).*/\2 \1/i' | tr a-z A-Z) ) )
+# Populates an associative array `efi_apps` mapping uppercase loader path to a
+# tab-separated string with fields (bootnum, display name, partition UUID)
+read_efi_apps() {
+    declare -gA efi_apps
+    local IFS=$'\t'
+    while read -r loader bootnum desc partuuid; do
+        efi_apps[$(echo -n "$loader" | tr a-z A-Z)]="$bootnum"$'\t'"$desc"$'\t'"$partuuid"
+    done < <(efibootmgr -v | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-fA-F-]\+\),.*File(\([^)]\+\)).*/\4\t\1\t\2\t\3/')
 }
 
 create_emboot_efi_app() {
-    local kver=$1
+    loader_basename=$1
+    suffix=$2
     efidevinfo=( $("$APPDIR"/get_device_info "$EFI_MOUNT") )
     efi_disk_and_part=( $(device_to_disk_and_partition "${efidevinfo[1]}") )
     efidisk=${efi_disk_and_part[0]}
     efipartition=${efi_disk_and_part[1]}
-    loader="\\EFI\\$OS_SHORT_NAME\\emboot\\$kver\\linux.efi"
-    efibootmgr -C -d "${efidisk}" -p "${efipartition}" -l "$loader" -L "${OS_NAME} measured boot ($kver)"
+    loader="\\EFI\\$OS_SHORT_NAME\\$loader_basename"
+    efibootmgr -C -d "${efidisk}" -p "${efipartition}" -l "$loader" -L "${OS_SHORT_NAME} emboot${2:+ ($2)}"
 }

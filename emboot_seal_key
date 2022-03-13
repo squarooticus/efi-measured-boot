@@ -11,7 +11,7 @@ if [[ $cmd = ./* ]]; then APPDIR=.; fi
 
 set -e
 
-TMPDIR=$(setup_tmp_dir)
+. "$(emboot_state_path)/state"
 
 cleanup() {
     [ -n "$TMPDIR" ] && rm -rf "$TMPDIR"
@@ -19,11 +19,12 @@ cleanup() {
 
 trap cleanup EXIT
 
+TMPDIR=$(setup_tmp_dir)
+
 read_counter >"$TMPDIR"/counter
 create_provision_context "$TMPDIR"
 
-for loader in ${@:-$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot/*/linux.efi}; do
-    seal_to_efi_app "$TMPDIR" "$loader"
-done
+seal_to_efi_app "$TMPDIR" "$(emboot_loader_unix_path)" "$primary"
+seal_to_efi_app "$TMPDIR" "$(emboot_loader_unix_path emboot_old.efi)" "$old"
 
 exit 0

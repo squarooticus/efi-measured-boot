@@ -45,12 +45,19 @@ create_provision_context() {
 
 predict_future_pcrs() {
     path_efi_app=$1
-    os_caps=$(echo -n "$OS_SHORT_NAME" | tr a-z A-Z)
-    tpm_futurepcr -L $SEAL_PCRS -H sha256 ${path_efi_app:+--substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/$os_caps.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/${os_caps}_OLD.EFI=$path_efi_app" --substitute-bsa-unix-path "/boot/efi/EFI/$os_caps/LINUX.EFI=$path_efi_app"} -o future_pcrs -v
+    tpm_futurepcr -L $SEAL_PCRS -H sha256 ${path_efi_app:+--substitute-bsa-unix-path "$(emboot_loader_unix_path)=$path_efi_app"} -o future_pcrs -v
 }
 
-emboot_kernel_dir() {
-    echo "$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot/${1:-$(uname -r)}"
+emboot_loader_unix_path() {
+    echo "$EFI_MOUNT/EFI/$OS_SHORT_NAME/${1:-emboot.efi}"
+}
+
+emboot_loader_path() {
+    echo '\EFI\'"$OS_SHORT_NAME"'\'"${1:-emboot.efi}"
+}
+
+emboot_state_path() {
+    echo "$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot${1:+/$1}"
 }
 
 create_efi_app() {
@@ -69,7 +76,9 @@ predict_future_pcrs() {
     workdir=${1:-.}
     substitute_efi_app=$2
     tpm_futurepcr -L "$SEAL_PCRS" -H sha256 \
-        ${substitute_efi_app:+--substitute-bsa-unix-path "$(emboot_kernel_dir)/linux.efi=$substitute_efi_app"} \
+        ${substitute_efi_app:+--substitute-bsa-unix-path "$(emboot_loader_unix_path)=$substitute_efi_app"} \
+        ${substitute_efi_app:+--substitute-bsa-unix-path "$(emboot_loader_unix_path emboot_old.efi)=$substitute_efi_app"} \
+        ${substitute_efi_app:+--substitute-bsa-unix-path "/boot/efi/EFI/DEBIAN/EMBOOT/5.16.0-3-AMD64/LINUX.EFI=$substitute_efi_app"} \
         -o "$workdir"/future_pcrs \
         -v
 }
@@ -88,11 +97,12 @@ seal_data() {
 seal_to_efi_app() {
     workdir=${1:-.}
     loader=$2
+    krel=$3
     rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
     predict_future_pcrs "$workdir" "$loader"
     seal_data "$workdir" <$LUKS_KEY
-    mkdir -p "$(dirname "$loader")"
-    cp -f "$workdir"/counter "$workdir"/sealed.pub "$workdir"/sealed.priv "$(dirname "$loader")"/
+    mkdir -p $(emboot_state_path "$krel")
+    cp -f "$workdir"/counter "$workdir"/sealed.pub "$workdir"/sealed.priv "$(emboot_state_path "$krel")/"
 }
 
 unseal_data() {
