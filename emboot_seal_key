@@ -24,7 +24,9 @@ TMPDIR=$(setup_tmp_dir)
 read_counter >"$TMPDIR"/counter
 create_provision_context "$TMPDIR"
 
-seal_to_efi_app "$TMPDIR" "$(emboot_loader_unix_path)" "$primary"
-seal_to_efi_app "$TMPDIR" "$(emboot_loader_unix_path emboot_old.efi)" "$old"
+read_efi_apps
+
+seal_to_loader "$TMPDIR" "$(emboot_loader_unix_path)" "$primary"
+seal_to_loader "$TMPDIR" "$(emboot_loader_unix_path emboot_old.efi)" "$old"
 
 exit 0

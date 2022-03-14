@@ -6,10 +6,12 @@ buildre() {
 }
 
 quote_args() {
-    sq="'"
-    dq='"'
-    fs=/
-    space=""
+    local sq="'"
+    local dq='"'
+    local fs=/
+    local space=""
+    local qw
+    local w
     for w; do
         if [ -n "$w" -a -z "${w//[0-9a-zA-Z_,.:=$fs-]}" ]; then
             echo -n "$space$w"
@@ -27,16 +29,16 @@ quote_re() {
 }
 
 device_to_disk_and_partition() {
-    dev=$1
-    devpartuuid=$(lsblk -n -o PARTUUID -r "$dev" | tr a-z A-Z)
-    parents=( $(lsblk -s -n -o NAME -r "$dev" | tail -n +2) )
+    local dev=$1
+    local devpartuuid=$(lsblk -n -o PARTUUID -r "$dev" | tr a-z A-Z)
+    local parents=( $(lsblk -s -n -o NAME -r "$dev" | tail -n +2) )
     if (( ${#parents[@]} != 1 )); then
         echo "Don't know how to handle $dev with other than one parent: ${parents[*]}" 1>&2
         exit 1
     fi
-    disk=/dev/${parents[0]}
-    part=$(echo "$dev" | grep -o '[0-9]\+$')
-    checkuuid=$(sgdisk "$disk" -i "$part" | grep -i 'Partition unique GUID' | sed 's/^.*://; s/[[:space:]]\+//g' | tr a-z A-Z)
+    local disk=/dev/${parents[0]}
+    local part=$(echo "$dev" | grep -o '[0-9]\+$')
+    local checkuuid=$(sgdisk "$disk" -i "$part" | grep -i 'Partition unique GUID' | sed 's/^.*://; s/[[:space:]]\+//g' | tr a-z A-Z)
     if [[ "$devpartuuid" != "$checkuuid" ]]; then
         echo "$dev somehow not $disk partition $part: PARTUUID mismatch ($devpartuuid vs $checkuuid)" 1>&2
         exit 1
@@ -180,13 +182,13 @@ qsort() {
 list_installed_kernels() {
     declare -a kvers
     shopt -s nullglob
-    kvers=( /boot/vmlinuz* )
+    local kvers=( /boot/vmlinuz* )
 
     kver_descending() {
-        vers=( "${@%%-[^0-9.-]*}" )
+        local vers=( "${@%%-[^0-9.-]*}" )
         vers=( "${vers[@]##*/vmlinuz-}" )
         compare_versions "${@%%-[^0-9.-]*}"
-        rc=$?
+        local rc=$?
         return $(( 4-rc ))
     }
 
@@ -197,22 +199,40 @@ list_installed_kernels() {
 }
 
 # Populates an associative array `efi_apps` mapping uppercase loader path to a
-# tab-separated string with fields (bootnum, display name, partition UUID)
+# tab-separated string with fields (bootnum, display name, partition UUID,
+# loader)
 read_efi_apps() {
     declare -gA efi_apps
     local IFS=$'\t'
+    local loader bootnum desc partuuid
     while read -r loader bootnum desc partuuid; do
-        efi_apps[$(echo -n "$loader" | tr a-z A-Z)]="$bootnum"$'\t'"$desc"$'\t'"$partuuid"
+        efi_apps[$(echo -n "$loader" | tr a-z A-Z)]="$bootnum"$'\t'"$desc"$'\t'"$partuuid"$'\t'"$loader"
     done < <(efibootmgr -v | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-fA-F-]\+\),.*File(\([^)]\+\)).*/\4\t\1\t\2\t\3/')
 }
 
-create_emboot_efi_app() {
-    loader_basename=$1
-    suffix=$2
-    efidevinfo=( $("$APPDIR"/get_device_info "$EFI_MOUNT") )
-    efi_disk_and_part=( $(device_to_disk_and_partition "${efidevinfo[1]}") )
-    efidisk=${efi_disk_and_part[0]}
-    efipartition=${efi_disk_and_part[1]}
-    loader="\\EFI\\$OS_SHORT_NAME\\$loader_basename"
+create_emboot_efi_entry() {
+    local loader_basename=$1
+    local suffix=$2
+    local efidevinfo=( $("$APPDIR"/get_device_info "$EFI_MOUNT") )
+    local efi_disk_and_part=( $(device_to_disk_and_partition "${efidevinfo[1]}") )
+    local efidisk=${efi_disk_and_part[0]}
+    local efipartition=${efi_disk_and_part[1]}
+    local loader="\\EFI\\$OS_SHORT_NAME\\$loader_basename"
     efibootmgr -C -d "${efidisk}" -p "${efipartition}" -l "$loader" -L "${OS_SHORT_NAME} emboot${2:+ ($2)}"
+}
+
+seal_to_loader() {
+    local workdir=${1:-.}
+    local loader=$2
+    local krel=$3
+
+    read_efi_apps
+    local oldIFS=$IFS; local IFS=$'\t'; primary_entry=( ${efi_apps[$(emboot_loader_path | tr a-z A-Z)]} ); IFS=$oldIFS
+    local oldIFS=$IFS; local IFS=$'\t'; old_entry=( ${efi_apps[$(emboot_loader_path emboot_old.efi | tr a-z A-Z)]} ); IFS=$oldIFS
+
+    rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
+    predict_future_pcrs "$workdir" --substitute-bsa-unix-path "$(efi_path_to_unix "${primary_entry[3]}")=$loader" --substitute-bsa-unix-path "$(efi_path_to_unix "${old_entry[3]}")=$loader"
+    seal_data "$workdir" <$LUKS_KEY
+    mkdir -p $(emboot_state_path "$krel")
+    cp -f "$workdir"/counter "$workdir"/sealed.pub "$workdir"/sealed.priv "$(emboot_state_path "$krel")/"
 }

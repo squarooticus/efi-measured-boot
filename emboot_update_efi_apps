@@ -14,14 +14,13 @@ set -e
 read_efi_apps
 
 for lbn in emboot.efi emboot_old.efi; do
-    loaderup=$(emboot_loader_path $lbn | tr a-z A-Z)
-    oldIFS=$IFS; IFS=$'\t'; entry=( ${efi_apps[$loaderup]} ); IFS=$oldIFS
+    oldIFS=$IFS; IFS=$'\t'; entry=( ${efi_apps[$(emboot_loader_path "$lbn" | tr a-z A-Z)]} ); IFS=$oldIFS
     if [[ -n "${entry[0]}" ]]; then
         echo "Existing EFI boot loader entry ${entry[0]} for $lbn" 1>&2
     else
         tag=$(echo -n "$lbn" | grep '_[^.]' | sed -e 's/^[^_]*_\([^.]\+\).*/\1/')
         echo "Creating EFI boot loader entry for $lbn${tag:+ with tag $tag}" 1>&2
-        create_emboot_efi_app "$lbn" "$tag"
+        create_emboot_efi_entry "$lbn" "$tag"
     fi
 done
 

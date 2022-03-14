@@ -43,17 +43,17 @@ create_provision_context() {
     tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "${1:-.}"/provision.ctx
 }
 
-predict_future_pcrs() {
-    path_efi_app=$1
-    tpm_futurepcr -L $SEAL_PCRS -H sha256 ${path_efi_app:+--substitute-bsa-unix-path "$(emboot_loader_unix_path)=$path_efi_app"} -o future_pcrs -v
-}
-
 emboot_loader_unix_path() {
     echo "$EFI_MOUNT/EFI/$OS_SHORT_NAME/${1:-emboot.efi}"
 }
 
 emboot_loader_path() {
     echo '\EFI\'"$OS_SHORT_NAME"'\'"${1:-emboot.efi}"
+}
+
+efi_path_to_unix() {
+    echo -n "$EFI_MOUNT"
+    echo "$@" | sed -e 's/\\/\//g'
 }
 
 emboot_state_path() {
@@ -74,13 +74,8 @@ create_efi_app() {
 
 predict_future_pcrs() {
     workdir=${1:-.}
-    substitute_efi_app=$2
-    tpm_futurepcr -L "$SEAL_PCRS" -H sha256 \
-        ${substitute_efi_app:+--substitute-bsa-unix-path "$(emboot_loader_unix_path)=$substitute_efi_app"} \
-        ${substitute_efi_app:+--substitute-bsa-unix-path "$(emboot_loader_unix_path emboot_old.efi)=$substitute_efi_app"} \
-        ${substitute_efi_app:+--substitute-bsa-unix-path "/boot/efi/EFI/DEBIAN/EMBOOT/5.16.0-3-AMD64/LINUX.EFI=$substitute_efi_app"} \
-        -o "$workdir"/future_pcrs \
-        -v
+    shift
+    tpm_futurepcr -L "$SEAL_PCRS" -H sha256 "$@" -o "$workdir"/future_pcrs -v
 }
 
 seal_data() {
@@ -92,17 +87,6 @@ seal_data() {
         -L "$workdir"/policy -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub
     tpm2_flushcontext "$workdir"/session.ctx
     rm -f "$workdir"/session.ctx
-}
-
-seal_to_efi_app() {
-    workdir=${1:-.}
-    loader=$2
-    krel=$3
-    rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
-    predict_future_pcrs "$workdir" "$loader"
-    seal_data "$workdir" <$LUKS_KEY
-    mkdir -p $(emboot_state_path "$krel")
-    cp -f "$workdir"/counter "$workdir"/sealed.pub "$workdir"/sealed.priv "$(emboot_state_path "$krel")/"
 }
 
 unseal_data() {
