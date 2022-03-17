@@ -218,7 +218,7 @@ create_emboot_efi_entry() {
     local efidisk=${efi_disk_and_part[0]}
     local efipartition=${efi_disk_and_part[1]}
     local loader="\\EFI\\$OS_SHORT_NAME\\$loader_basename"
-    efibootmgr -C -d "${efidisk}" -p "${efipartition}" -l "$loader" -L "${OS_SHORT_NAME} emboot${2:+ ($2)}"
+    efibootmgr -C -d "${efidisk}" -p "${efipartition}" -l "$loader" -L "${OS_SHORT_NAME} emboot${suffix:+ ($suffix)}"
 }
 
 seal_to_loader() {
