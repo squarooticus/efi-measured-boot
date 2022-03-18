@@ -36,8 +36,10 @@ else
     echo "Generating new key for root partition LUKS header" 1>&2
     (umask 077 && dd if=/dev/urandom of="$LUKS_KEY" bs=128 count=1)
 fi
-echo "You may be prompted to enter an existing LUKS passphrase for your root partition" 1>&2
-cryptsetup luksAddKey "${cryptdev[1]}" "$LUKS_KEY"
+if ! cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" "${cryptdev[1]}" </dev/null >/dev/null 2>&1; then
+    echo "You may be prompted to enter an existing LUKS passphrase for your root partition" 1>&2
+    cryptsetup luksAddKey "${cryptdev[1]}" "$LUKS_KEY"
+fi
 
 echo "Installing EFI blobs" 1>&2
 ./emboot_install
