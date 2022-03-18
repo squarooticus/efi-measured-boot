@@ -109,9 +109,9 @@ compare_versions() {
             return 3
         else
             # Compare lexicographically
-            if [ "${a[i]}" '<' "${b[i]}" ]; then
+            if [[ ${a[i]} < ${b[i]} ]]; then
                 return 1
-            elif [ "${a[i]}" '>' "${b[i]}" ]; then
+            elif [[ ${a[i]} > ${b[i]} ]]; then
                 return 3
             fi
         fi
