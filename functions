@@ -21,12 +21,6 @@ umount_efi() {
     fi
 }
 
-provision_counter() {
-    tpm2_nvundefine "$COUNTER_HANDLE" -Q || true
-    tpm2_nvdefine "$COUNTER_HANDLE" -C o -s 8 -a 'ownerread|ownerwrite|policywrite|nt=counter'
-    tpm2_nvincrement -C o "$COUNTER_HANDLE"
-}
-
 increment_counter() {
     tpm2_nvincrement -C o "$COUNTER_HANDLE"
 }

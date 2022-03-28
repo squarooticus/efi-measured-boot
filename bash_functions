@@ -28,6 +28,44 @@ quote_re() {
     echo "$1" | sed -e 's/[]\/\\^$*+?.()|[{}-]/\\\0/g'
 }
 
+parse_yaml() {
+   local prefix=$2
+   local s='[[:space:]]*' w='[a-zA-Z0-9_]*' fs=$(echo @|tr @ '\034')
+   sed -ne "s|^\($s\):|\1|" \
+       -e "s|^\($s\)\($w\)$s:$s[\"']\(.*\)[\"']$s\$|\1$fs\2$fs\3|p" \
+       -e "s|^\($s\)\($w\)$s:$s\(.*\)$s\$|\1$fs\2$fs\3|p" $1 | \
+       awk -F$fs '{
+          indent = length($1)/2;
+          vname[indent] = $2;
+          for (i in vname) {if (i > indent) {delete vname[i]}}
+              if (length($3) > 0) {
+                  vn=""; for (i=0; i<indent; i++) {vn=(vn)(vname[i])("_")}
+                  printf("%s%s%s=\"%s\"\n", "'$prefix'",vn, $2, $3);
+              }
+          }'
+}
+
+provision_counter() {
+    if tpm2_nvreadpublic -Q "$COUNTER_HANDLE" 2>/dev/null; then
+        eval "$(tpm2_nvreadpublic "$COUNTER_HANDLE" | parse_yaml '' nvmd_)"
+        invar=nvmd_$(printf "0x%x" $COUNTER_HANDLE)_attributes_value
+        if [ -z "${!invar}" ]; then
+            echo "Cannot parse attributes for NV index $COUNTER_HANDLE" 1>&2
+            return 1
+        elif [[ ${!invar} != "0x12000222" ]]; then
+            echo "Conflicting counter with invalid attributes at NV index $COUNTER_HANDLE" 1>&2
+            return 1
+        fi
+        echo "Using existing counter at NV index $COUNTER_HANDLE" 1>&2
+    else
+        if ! tpm2_nvdefine "$COUNTER_HANDLE" -C o -s 8 -a 'ownerread|ownerwrite|no_da|nt=counter'; then
+            echo "Unable to create counter at NV index $COUNTER_HANDLE" 1>&2
+            return 1
+        fi
+    fi
+    tpm2_nvincrement -C o "$COUNTER_HANDLE" && tpm2_shutdown
+}
+
 device_to_disk_and_partition() {
     local dev=$1
     local devpartuuid=$(lsblk -n -o PARTUUID -r "$dev" | tr a-z A-Z)
