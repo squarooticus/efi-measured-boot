@@ -33,15 +33,15 @@ device_to_disk_and_partition() {
     local devpartuuid=$(lsblk -n -o PARTUUID -r "$dev" | tr a-z A-Z)
     local parents=( $(lsblk -s -n -o NAME -r "$dev" | tail -n +2) )
     if (( ${#parents[@]} != 1 )); then
-        echo "Don't know how to handle $dev with other than one parent: ${parents[*]}" 1>&2
-        exit 1
+        echo "Do not know how to handle $dev with other than one parent: ${parents[*]}" 1>&2
+        return 1
     fi
     local disk=/dev/${parents[0]}
     local part=$(echo "$dev" | grep -o '[0-9]\+$')
     local checkuuid=$(sgdisk "$disk" -i "$part" | grep -i 'Partition unique GUID' | sed 's/^.*://; s/[[:space:]]\+//g' | tr a-z A-Z)
-    if [[ "$devpartuuid" != "$checkuuid" ]]; then
+    if [[ $devpartuuid != "$checkuuid" ]]; then
         echo "$dev somehow not $disk partition $part: PARTUUID mismatch ($devpartuuid vs $checkuuid)" 1>&2
-        exit 1
+        return 1
     fi
     echo "$disk $part"
 }
@@ -59,7 +59,7 @@ compare_versions() {
     local LC_ALL=C
 
     # Optimization
-    if [[ $1 == $2 ]]; then
+    if [[ $1 == "$2" ]]; then
         return 2
     fi
 
@@ -211,6 +211,7 @@ read_efi_vars() {
     declare -ga efi_boot_order
     local IFS=','
     efi_boot_order=( $(efibootmgr -v | grep '^BootOrder' | sed -e 's/^BootOrder: *//') )
+    efi_boot_current=$(efibootmgr -v | grep '^BootCurrent' | sed -e 's/^BootCurrent: *//')
 }
 
 create_emboot_efi_entry() {
@@ -233,8 +234,17 @@ seal_to_loader() {
     local oldIFS=$IFS; local IFS=$'\t'; primary_entry=( ${efi_apps[$(emboot_loader_path | tr a-z A-Z)]} ); IFS=$oldIFS
     local oldIFS=$IFS; local IFS=$'\t'; old_entry=( ${efi_apps[$(emboot_loader_path emboot_old.efi | tr a-z A-Z)]} ); IFS=$oldIFS
 
+    if [[ ${primary_entry[0]} == "$efi_boot_current" ]]; then
+        current_loader=${primary_entry[3]}
+    elif [[ ${old_entry[0]} == "$efi_boot_current" ]]; then
+        current_loader=${old_entry[3]}
+    else
+        echo "Cannot seal under non-emboot boot chain (BootCurrent=$efi_boot_current)" 1>&2
+        return 1
+    fi
+
     rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
-    predict_future_pcrs "$workdir" --substitute-bsa-unix-path "$(efi_path_to_unix "${primary_entry[3]}")=$loader" --substitute-bsa-unix-path "$(efi_path_to_unix "${old_entry[3]}")=$loader"
+    predict_future_pcrs "$workdir" --substitute-bsa-unix-path "$(efi_path_to_unix "$current_loader")=$loader"
     seal_data "$workdir" <$LUKS_KEY
     mkdir -p $(emboot_state_path "$krel")
     cp -f "$workdir"/counter "$workdir"/sealed.pub "$workdir"/sealed.priv "$(emboot_state_path "$krel")/"
