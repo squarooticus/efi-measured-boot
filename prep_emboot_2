@@ -48,7 +48,7 @@ echo "Adding EFI boot entries" 1>&2
 ./emboot_update_efi_apps
 
 echo "Setting next EFI boot to latest emboot kernel blob" 1>&2
-read_efi_apps
+read_efi_vars
 bn=${efi_apps[$(emboot_loader_path | tr a-z A-Z)]%%$'\t'*}
 if [ -z "$bn" ]; then
     echo "Can't find emboot EFI boot entry for $(emboot_loader_path)" 1>&2

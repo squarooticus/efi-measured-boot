@@ -11,7 +11,7 @@ if [[ $cmd = ./* ]]; then APPDIR=.; fi
 
 set -e
 
-read_efi_apps
+read_efi_vars
 
 for lbn in emboot.efi emboot_old.efi; do
     oldIFS=$IFS; IFS=$'\t'; entry=( ${efi_apps[$(emboot_loader_path "$lbn" | tr a-z A-Z)]} ); IFS=$oldIFS

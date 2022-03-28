@@ -201,13 +201,16 @@ list_installed_kernels() {
 # Populates an associative array `efi_apps` mapping uppercase loader path to a
 # tab-separated string with fields (bootnum, display name, partition UUID,
 # loader)
-read_efi_apps() {
-    declare -gA efi_apps
+read_efi_vars() {
+    declare -gA efi_apps; efi_apps=()
     local IFS=$'\t'
     local loader bootnum desc partuuid
     while read -r loader bootnum desc partuuid; do
         efi_apps[$(echo -n "$loader" | tr a-z A-Z)]="$bootnum"$'\t'"$desc"$'\t'"$partuuid"$'\t'"$loader"
     done < <(efibootmgr -v | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-fA-F-]\+\),.*File(\([^)]\+\)).*/\4\t\1\t\2\t\3/')
+    declare -ga efi_boot_order
+    local IFS=','
+    efi_boot_order=( $(efibootmgr -v | grep '^BootOrder' | sed -e 's/^BootOrder: *//') )
 }
 
 create_emboot_efi_entry() {
@@ -226,7 +229,7 @@ seal_to_loader() {
     local loader=$2
     local krel=$3
 
-    read_efi_apps
+    read_efi_vars
     local oldIFS=$IFS; local IFS=$'\t'; primary_entry=( ${efi_apps[$(emboot_loader_path | tr a-z A-Z)]} ); IFS=$oldIFS
     local oldIFS=$IFS; local IFS=$'\t'; old_entry=( ${efi_apps[$(emboot_loader_path emboot_old.efi | tr a-z A-Z)]} ); IFS=$oldIFS
 
