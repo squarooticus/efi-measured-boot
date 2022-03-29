@@ -24,11 +24,11 @@ cryptdev=( $("$APPDIR"/get_crypttab_entry "${rootdev[1]}") )
 
 cryptopts=${cryptdev[3]}
 if [[ $cryptopts != *luks* ]]; then
-    echo "crypttab entry missing luks option: ${cryptdev[3]}"
+    echo "crypttab entry missing luks option: $cryptopts"
     exit 1
 fi
 if [[ $cryptopts != *keyscript=*emboot_unseal.sh* ]]; then
-    echo "keyscript option in crypttab entry missing or invalid: ${cryptdev[3]}"
+    echo "keyscript option in crypttab entry missing or invalid: $cryptopts"
     exit 1
 fi
 
