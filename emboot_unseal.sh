@@ -22,17 +22,17 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
 
     mount_efi
     for i in counter sealed.pub sealed.priv; do
-        cp -f "$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot/$(uname -r)/$i" "$emboot_tmp/"
+        cp -f "$(emboot_state_path "$(uname -r)")/$i" "$emboot_tmp/"
     done
     umount_efi
 
     create_provision_context
     if unseal_data 1>&3 3>&-; then
-        echo "$(basename $cmd) succeeded"
+        echo "$(basename $cmd) succeeded for $CRYPTTAB_NAME"
         exit 0
     fi
 
-    echo "$(basename $cmd) failed"
+    echo "$(basename $cmd) failed for $CRYPTTAB_NAME"
     cd "$oldpwd"
 fi
 
