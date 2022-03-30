@@ -1,7 +1,7 @@
 #! /bin/bash
 
 SYSTEMD_STUB=/usr/lib/systemd/boot/efi/linuxx64.efi.stub
-CHECKS=( root arch no_separate_boot mounted_efi root_luks systemd_stub tpm packages )
+CHECKS=( root arch no_separate_boot mounted_efi root_luks systemd_stub tpm packages binaries )
 
 . ./functions
 . ./bash_functions
@@ -64,10 +64,19 @@ check_tpm() {
 }
 
 check_packages() {
-    if (( $(dpkg-query -W -f='${Status}\n' initramfs-tools gdisk 2>/dev/null | grep -c "ok installed") < 2 )); then
+    if (( $(dpkg-query -W -f='${Status}\n' initramfs-tools 2>/dev/null | grep -c "ok installed") < 1 )); then
         echo "initramfs-tools required (dracut is not supported)" 1>&2
         return 1
     fi
+}
+
+check_binaries() {
+    for bin in sgdisk efibootmgr cryptsetup sed awk tr grep diff basename dirname mount umount tpm2_create tpm2_createprimary tpm2_flushcontext tpm2_load tpm2_nvdefine tpm2_nvincrement tpm2_nvread tpm2_nvreadpublic tpm2_pcrread tpm2_policynv tpm2_policypcr tpm2_shutdown tpm2_startauthsession tpm2_unseal lsblk objcopy pip3 update-initramfs dd; do
+        if [ -z "$(type -Pt "$bin")" ]; then
+            echo "Cannot find $bin in path" 1>&2
+            return 1
+        fi
+    done
 }
 
 set -e
