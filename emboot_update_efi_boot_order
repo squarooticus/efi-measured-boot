@@ -1,0 +1,44 @@
+#! /bin/bash
+
+cmd=$0
+
+exec 3>&1 1>&2
+
+[ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
+if [[ $cmd = ./* ]]; then APPDIR=.; fi
+. "${APPDIR:-.}"/functions
+. "${APPDIR:-.}"/bash_functions
+
+set -e
+
+if is_true "$UPDATE_BOOT_ORDER"; then
+    read_efi_vars
+    oldIFS=$IFS; IFS=$'\t'
+    primary=( ${efi_apps[$(emboot_loader_path "emboot.efi" | tr a-z A-Z)]} )
+    old=( ${efi_apps[$(emboot_loader_path "emboot_old.efi" | tr a-z A-Z)]} )
+    IFS=$oldIFS
+    primary_bn=${primary[0]}
+    old_bn=${old[0]}
+    if [ -z "$primary_bn" -o -z "$old_bn" ]; then
+        echo "Missing emboot EFI boot entries: not updating boot order" 1>&2
+        exit 1
+    fi
+    if [ "${efi_boot_order[0]}" == "$primary_bn" -a "${efi_boot_order[1]}" == "$old_bn" ]; then
+        echo "No need to update EFI boot order" 1>&2
+        exit 0
+    fi
+    new_boot_order=( $primary_bn $old_bn )
+    for bn in ${efi_boot_order[@]}; do
+        if [ "$bn" != "$primary_bn" -a "$bn" != "$old_bn" ]; then
+            new_boot_order+=($bn)
+        fi
+    done
+    IFS=','
+    echo "Updating EFI boot order to ${new_boot_order[*]}" 1>&2
+    efibootmgr -o "${new_boot_order[*]}"
+    OFS=$oldIFS
+else
+    echo "Updating EFI boot order disabled by config" 1>&2
+fi
+
+exit 0

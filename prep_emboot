@@ -43,7 +43,7 @@ test -e "$HOOKSDIR"
 cp -f initramfs-hooks/efi-measured-boot "$HOOKSDIR/"
 
 mkdir -p "$APPDIR"
-cp -f bash_functions emboot_install emboot_seal_key emboot_unseal.sh emboot_update_efi_apps functions "$APPDIR/"
+cp -f bash_functions emboot_install emboot_seal_key emboot_unseal.sh emboot_update_efi_apps emboot_update_efi_boot_order functions "$APPDIR/"
 
 mkdir -p "$BINDIR"
 cp -f update-emboot "$BINDIR/"
@@ -96,6 +96,7 @@ SEAL_PCRS=0,2,4
 LUKS_KEY=/etc/keys/root-emboot.key
 KERNEL_PARAMS="ro add_efi_memmap"
 APPDIR=$(quote_args "$APPDIR")
+UPDATE_BOOT_ORDER=y
 EOF
 
 # Modify crypttab

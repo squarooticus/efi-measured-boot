@@ -11,4 +11,5 @@ set -e
 
 "$APPDIR"/emboot_install
 "$APPDIR"/emboot_update_efi_apps
+"$APPDIR"/emboot_update_efi_boot_order
 "$APPDIR"/emboot_seal_key

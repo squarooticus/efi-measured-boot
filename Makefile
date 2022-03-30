@@ -18,5 +18,5 @@ step2: checks
 
 step3: checks
 	@./emboot_seal_key
+	@./emboot_update_efi_boot_order
 	@echo "Installation complete: run update-emboot whenever kernel or initrd are updated" 1>&2
-	@echo "You will likely also want to change your boot order now to boot the new measured boot entry by default" 1>&2

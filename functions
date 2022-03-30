@@ -4,6 +4,18 @@ setup_tmp_dir() {
     mktemp -d -t emboot-XXXXXXXXXX
 }
 
+is_true() {
+    case "$(echo "$1" | tr A-Z a-z)" in
+        y*|t*|1)
+            return 0
+            ;;
+        n*|f*|0|'')
+            return 1
+            ;;
+    esac
+    return 0
+}
+
 NEED_UMOUNT_EFI=''
 
 mount_efi() {
