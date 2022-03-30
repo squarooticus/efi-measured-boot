@@ -39,7 +39,7 @@ check_mounted_efi() {
 }
 
 check_root_luks() {
-    cryptdev=( $(./get_crypttab_entry $(./get_device_info / | awk '{print $2;}') ) )
+    cryptdev=( $(get_crypttab_entry $(get_device_info / | awk '{print $2;}') ) )
     if (( ${#cryptdev[@]} == 0 )); then
         echo "Root has no parent crypttab entry" 1>&2
         return 1

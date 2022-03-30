@@ -215,6 +215,54 @@ qsort() {
     qsort "$aname" "$compare" $(( j + 1 )) $end
 }
 
+get_crypttab_entry() (
+    local cmd=$0
+    local devnode=$1
+
+    set -e
+
+    local parentdevices=( $(lsblk -s -t $devnode -o UUID -n -r | grep '.') )
+    local parentdevicenodes=( $(lsblk -p -s -t $devnode -o NAME -n -r | grep '.') )
+    local OLDIFS=$IFS
+    local IFS=$'\n'
+    local crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep -E "UUID=($(buildre ${parentdevices[@]}))" || true) )
+    if (( ${#crypttabentries[@]} == 0 )); then
+        echo 'crypttab entry not found via UUID; trying node' 1>&2
+        crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep -E "$(buildre ${parentdevicenodes[@]})" || true) )
+    fi
+    IFS=$OLDIFS
+    if (( ${#crypttabentries[@]} == 0 )); then
+        echo 'crypttab entry not found' 1>&2
+        exit 1
+    fi
+    if (( ${#crypttabentries[@]} > 1 )); then
+        echo 'filesystem in multiple crypttab entries unsupported' 1>&2
+        IFS=$'\n'; echo "${crypttabentries[*]}"
+        exit 1
+    fi
+    local cryptdev=( ${crypttabentries[0]} )
+
+    IFS=' '
+    echo "${cryptdev[*]}"
+)
+
+get_device_info() (
+    local cmd=$0
+    local trace_path=${1:-/}
+
+    set -e
+
+    local mount_point=$(stat -c '%m' $trace_path)
+
+    local dev=( $(lsblk -n -o UUID,PATH,MOUNTPOINT -r | awk '$3 == "'"$mount_point"'" { print $1 " " $2; }') )
+    if (( ${#dev[@]} == 0 )); then
+        echo "no block device found with mount point $mount_point" 1>&2
+        exit 1
+    fi
+
+    echo "${dev[0]} ${dev[1]}"
+)
+
 # Return a space-delimited list of kernel images in /boot in reverse order
 # (highest first).
 list_installed_kernels() {

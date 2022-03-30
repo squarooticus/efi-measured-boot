@@ -19,8 +19,8 @@ cleanup() {
 
 trap cleanup EXIT
 
-rootdev=( $("$APPDIR"/get_device_info /) )
-cryptdev=( $("$APPDIR"/get_crypttab_entry "${rootdev[1]}") )
+rootdev=( $(get_device_info /) )
+cryptdev=( $(get_crypttab_entry "${rootdev[1]}") )
 
 cryptopts=${cryptdev[3]}
 if [[ $cryptopts != *luks* ]]; then

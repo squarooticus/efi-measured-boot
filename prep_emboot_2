@@ -10,8 +10,8 @@ set -e
 
 provision_counter
 
-rootdevinfo=( $(./get_device_info /) )
-cryptdev=( $(./get_crypttab_entry ${rootdevinfo[1]}) )
+rootdevinfo=( $(get_device_info /) )
+cryptdev=( $(get_crypttab_entry ${rootdevinfo[1]}) )
 
 ### BREAKING CHANGES BEGIN HERE
 

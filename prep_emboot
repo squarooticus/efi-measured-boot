@@ -37,21 +37,21 @@ set -e
 OS_NAME=$NAME
 OS_SHORT_NAME=$ID
 
-efidevinfo=( $(./get_device_info /boot/efi) )
+efidevinfo=( $(get_device_info /boot/efi) )
 
 test -e "$HOOKSDIR"
 cp -f initramfs-hooks/efi-measured-boot "$HOOKSDIR/"
 
 mkdir -p "$APPDIR"
-cp -f bash_functions emboot_install emboot_seal_key emboot_unseal.sh emboot_update_efi_apps functions get_crypttab_entry get_device_info "$APPDIR/"
+cp -f bash_functions emboot_install emboot_seal_key emboot_unseal.sh emboot_update_efi_apps functions "$APPDIR/"
 
 mkdir -p "$BINDIR"
 cp -f update-emboot "$BINDIR/"
 
 (cd tpm_futurepcr && pip3 install .)
 
-rootdevinfo=( $(./get_device_info /) )
-cryptdev=( $(./get_crypttab_entry ${rootdevinfo[1]}) )
+rootdevinfo=( $(get_device_info /) )
+cryptdev=( $(get_crypttab_entry ${rootdevinfo[1]}) )
 
 cryptopts=${cryptdev[3]}
 if [[ $cryptopts != *luks* ]]; then
