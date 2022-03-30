@@ -7,7 +7,7 @@ cmd=$0
 keyscript="/lib/cryptsetup/askpass"
 keyscriptarg="Please unlock disk $CRYPTTAB_NAME: "
 
-trap 'rc=$?; [ "$rc" -eq 0 ] && exit 0; umount_efi; echo "$(basename $cmd) failed with exit code $rc"; -n "$oldpwd" && cd "$oldpwd"; exec "$keyscript" "$keyscriptarg" 1>&3 3>&-' EXIT
+trap 'rc=$?; [ "$rc" -eq 0 ] && exit 0; umount_efi; echo "$(basename $cmd) failed with exit code $rc"; test -n "$oldpwd" && cd "$oldpwd"; exec "$keyscript" "$keyscriptarg" 1>&3 3>&-' EXIT
 
 set -e
 
