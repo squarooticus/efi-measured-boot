@@ -28,11 +28,11 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
 
     create_provision_context
     if unseal_data 1>&3 3>&-; then
-        echo "$(basename $cmd) succeeded for $CRYPTTAB_NAME"
+        echo "$(basename $cmd) succeeded${CRYPTTAB_NAME:+ for $CRYPTTAB_NAME}"
         exit 0
     fi
 
-    echo "$(basename $cmd) failed for $CRYPTTAB_NAME"
+    echo "$(basename $cmd) failed${CRYPTTAB_NAME:+ for $CRYPTTAB_NAME}"
     cd "$oldpwd"
 fi
 
