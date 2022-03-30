@@ -22,7 +22,6 @@ revert_changes() {
     fi
 }
 
-#trap revert_changes INT TERM ERR
 trap 'rc=$?; [ "$rc" -eq 0 ] && exit 0; revert_changes' EXIT
 
 # Update initrd according to newly-installed hook
