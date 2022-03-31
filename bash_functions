@@ -220,23 +220,25 @@ qsort() {
     qsort "$aname" "$compare" $(( j + 1 )) $end
 }
 
-get_crypttab_entry() (
+get_crypttab_entry() {(
     local cmd=$0
     local devnode=$1
 
     set -e
 
     local parentdevices=( $(lsblk -s -t $devnode -o UUID -n -r | grep '.' | sort | uniq) )
-    local parentdevicenodes=( $(lsblk -p -s -t $devnode -o NAME -n -r | grep '.' | sort | uniq) )
     local OLDIFS=$IFS
     local IFS=$'\n'
     local crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep 'UUID=\('"$(any_of_bre "${parentdevices[@]}")"'\)' || true) )
-    if (( ${#crypttabentries[@]} == 0 )); then
+    if (( ${#parentdevices[@]} == 0 || ${#crypttabentries[@]} == 0 )); then
         echo 'crypttab entry not found via UUID; trying node' 1>&2
-        crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep "$(any_of_bre "${parentdevicenodes[@]}")" || true) )
+        IFS=$OLDIFS
+        local parentdevices=( $(lsblk -p -s -t $devnode -o NAME -n -r | grep '.' | sort | uniq) )
+        IFS=$'\n'
+        crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep "$(any_of_bre "${parentdevices[@]}")" || true) )
     fi
     IFS=$OLDIFS
-    if (( ${#crypttabentries[@]} == 0 )); then
+    if (( ${#parentdevices[@]} == 0 || ${#crypttabentries[@]} == 0 )); then
         echo 'crypttab entry not found' 1>&2
         exit 1
     fi
@@ -249,9 +251,9 @@ get_crypttab_entry() (
 
     IFS=' '
     echo "${cryptdev[*]}"
-)
+)}
 
-get_device_info() (
+get_device_info() {(
     local cmd=$0
     local trace_path=${1:-/}
 
@@ -266,7 +268,7 @@ get_device_info() (
     fi
 
     echo "${dev[0]} ${dev[1]}"
-)
+)}
 
 # Return a space-delimited list of kernel images in /boot in reverse order
 # (highest first).
