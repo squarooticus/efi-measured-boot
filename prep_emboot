@@ -84,7 +84,7 @@ mkdir -p "$CONFIGDIR"
 cfgfile=$CONFIGDIR/config
 if [ -e "$cfgfile" ]; then
     cfgfile="$cfgfile.new"
-    echo "Preserving existing config: examine $cfgfile.new and move into place or merge by hand"
+    echo "Preserving existing config: examine $cfgfile and move into place or merge by hand"
 fi
 cat >$cfgfile <<EOF
 EFI_MOUNT=/boot/efi
