@@ -220,6 +220,8 @@ qsort() {
     qsort "$aname" "$compare" $(( j + 1 )) $end
 }
 
+# Given a device node, output the unique entry from /etc/crypttab covering that
+# device (e.g., containing that partition or LVM logical volume or whatever).
 get_crypttab_entry() {(
     local cmd=$0
     local devnode=$1
@@ -253,6 +255,7 @@ get_crypttab_entry() {(
     echo "${cryptdev[*]}"
 )}
 
+# Given a path, output `UUID device_node_path` for the containing filesystem.
 get_device_info() {(
     local cmd=$0
     local trace_path=${1:-/}
@@ -270,7 +273,7 @@ get_device_info() {(
     echo "${dev[0]} ${dev[1]}"
 )}
 
-# Return a space-delimited list of kernel images in /boot in reverse order
+# Output a space-separated list of kernel images in /boot in reverse order
 # (highest first).
 list_installed_kernels() {
     declare -a kvers
@@ -291,9 +294,14 @@ list_installed_kernels() {
     echo "${kvers[*]}"
 }
 
-# Populates an associative array `efi_apps` mapping uppercase loader path to a
-# tab-separated string with fields (bootnum, display name, partition UUID,
-# loader)
+# Populates:
+#  * An associative array `efi_apps` mapping uppercase loader path to a
+#  tab-separated string with fields (bootnum, display name, partition UUID,
+#  loader)
+#  * An array `efi_boot_order` containing the boot order (each element of which
+#  is 4 hex digits)
+#  * A string `efi_boot_current` containing the current boot entry (also 4 hex
+#  digits)
 read_efi_vars() {
     declare -gA efi_apps; efi_apps=()
     local IFS=$'\t'
@@ -307,17 +315,26 @@ read_efi_vars() {
     efi_boot_current=$(efibootmgr -v | grep '^BootCurrent' | sed -e 's/^BootCurrent: *//')
 }
 
+# Given a loader filename (no path: it must be in
+# $EFI_MOUNT/EFI/$OS_SHORT_NAME) and an optional tag (otherwise the empty
+# string), creates a new EFI boot entry for that loader with the OS short name
+# and the optional tag.
 create_emboot_efi_entry() {
     local loader_basename=$1
-    local suffix=$2
+    local tag=$2
     local efidevinfo=( $("$APPDIR"/get_device_info "$EFI_MOUNT") )
     local efi_disk_and_part=( $(device_to_disk_and_partition "${efidevinfo[1]}") )
     local efidisk=${efi_disk_and_part[0]}
     local efipartition=${efi_disk_and_part[1]}
     local loader="\\EFI\\$OS_SHORT_NAME\\$loader_basename"
-    efibootmgr -C -d "$efidisk" -p "$efipartition" -l "$loader" -L "$OS_SHORT_NAME emboot${suffix:+ ($suffix)}"
+    efibootmgr -C -d "$efidisk" -p "$efipartition" -l "$loader" -L "$OS_SHORT_NAME emboot${tag:+ ($tag)}"
 }
 
+# Given a working directory (or $PWD if empty), a path to a loader, and a
+# kernel release string (of the form returned by uname -r), seals the LUKS
+# passphrase to the loader by predicting future PCR values based on the UEFI
+# boot log for the current boot. Will bomb out if the system has not been
+# booted from either the primary or old emboot boot entry.
 seal_to_loader() {
     local workdir=${1:-.}
     local loader=$2
@@ -325,7 +342,7 @@ seal_to_loader() {
 
     read_efi_vars
     local oldIFS=$IFS; local IFS=$'\t'; primary_entry=( ${efi_apps[$(emboot_loader_path | tr a-z A-Z)]} ); IFS=$oldIFS
-    local oldIFS=$IFS; local IFS=$'\t'; old_entry=( ${efi_apps[$(emboot_loader_path emboot_old.efi | tr a-z A-Z)]} ); IFS=$oldIFS
+    oldIFS=$IFS; IFS=$'\t'; old_entry=( ${efi_apps[$(emboot_loader_path emboot_old.efi | tr a-z A-Z)]} ); IFS=$oldIFS
 
     if [[ ${primary_entry[0]} == "$efi_boot_current" ]]; then
         current_loader=${primary_entry[3]}
