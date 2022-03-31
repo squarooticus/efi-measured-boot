@@ -1,10 +1,5 @@
 #! /bin/bash
 
-buildre() {
-    local IFS='|'
-    echo "${*//\//\\\/}"
-}
-
 quote_args() {
     local sq="'"
     local dq='"'
@@ -24,8 +19,18 @@ quote_args() {
     done
 }
 
-quote_re() {
-    echo "$1" | sed -e 's/[]\/\\^$*+?.()|[{}-]/\\\0/g'
+quote_bre() {
+    echo "$1" | sed -e 's/[]\\^$*.[]/\\\0/g'
+}
+
+any_of_bre() {
+    quoted=""
+    oor=""
+    for w; do
+        quoted=$quoted$oor$(quote_bre "$w")
+        oor='\|'
+    done
+    echo "$quoted"
 }
 
 parse_yaml() {
@@ -221,14 +226,14 @@ get_crypttab_entry() (
 
     set -e
 
-    local parentdevices=( $(lsblk -s -t $devnode -o UUID -n -r | grep '.') )
-    local parentdevicenodes=( $(lsblk -p -s -t $devnode -o NAME -n -r | grep '.') )
+    local parentdevices=( $(lsblk -s -t $devnode -o UUID -n -r | grep '.' | sort | uniq) )
+    local parentdevicenodes=( $(lsblk -p -s -t $devnode -o NAME -n -r | grep '.' | sort | uniq) )
     local OLDIFS=$IFS
     local IFS=$'\n'
-    local crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep -E "UUID=($(buildre ${parentdevices[@]}))" || true) )
+    local crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep 'UUID=\('"$(any_of_bre "${parentdevices[@]}")"'\)' || true) )
     if (( ${#crypttabentries[@]} == 0 )); then
         echo 'crypttab entry not found via UUID; trying node' 1>&2
-        crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep -E "$(buildre ${parentdevicenodes[@]})" || true) )
+        crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep "$(any_of_bre "${parentdevicenodes[@]}")" || true) )
     fi
     IFS=$OLDIFS
     if (( ${#crypttabentries[@]} == 0 )); then
