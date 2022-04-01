@@ -357,5 +357,5 @@ seal_to_loader() {
     predict_future_pcrs "$workdir" --substitute-bsa-unix-path "$(efi_path_to_unix "$current_loader")=$loader"
     seal_data "$workdir" <$LUKS_KEY
     mkdir -p $(emboot_state_path "$krel")
-    cp -f "$workdir"/counter "$workdir"/sealed.pub "$workdir"/sealed.priv "$(emboot_state_path "$krel")/"
+    cp -f "$workdir"/pcrs "$workdir"/counter "$workdir"/sealed.pub "$workdir"/sealed.priv "$(emboot_state_path "$krel")/"
 }
