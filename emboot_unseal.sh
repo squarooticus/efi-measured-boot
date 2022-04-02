@@ -9,7 +9,15 @@ keyscriptarg="Please unlock disk${CRYPTTAB_NAME:+ $CRYPTTAB_NAME}: "
 
 tmpdir=
 
-trap 'rc=$?; [ "$rc" -eq 0 ] && exit 0; umount_efi; echo "$(basename $cmd) failed with exit code $rc"; test -n "$oldpwd" && cd "$oldpwd"; test -n "$tmpdir" && rm -rf "$tmpdir"; exec "$keyscript" "$keyscriptarg" 1>&3 3>&-' EXIT
+fallback() {
+    echo "$(basename "$cmd") failed with exit code $rc"
+    umount_efi
+    test -n "$oldpwd" && cd "$oldpwd"
+    test -n "$tmpdir" && rm -rf "$tmpdir"
+    exec "$keyscript" "$keyscriptarg" 1>&3 3>&-
+}
+
+trap 'rc=$?; [ "$rc" -eq 0 ] && exit 0; fallback' EXIT
 
 set -e
 
@@ -29,13 +37,13 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
 
     create_provision_context
     if unseal_data 1>&3 3>&-; then
-        echo "$(basename $cmd) succeeded${CRYPTTAB_NAME:+ for $CRYPTTAB_NAME}"
+        echo "$(basename "$cmd") succeeded${CRYPTTAB_NAME:+ for $CRYPTTAB_NAME}"
         exit 0
     fi
 
     cd "$oldpwd"
     rm -rf "$tmpdir"
-    echo "$(basename $cmd) failed${CRYPTTAB_NAME:+ for $CRYPTTAB_NAME}"
+    echo "$(basename "$cmd") failed${CRYPTTAB_NAME:+ for $CRYPTTAB_NAME}"
 fi
 
 exec "$keyscript" "$keyscriptarg" 1>&3 3>&-
