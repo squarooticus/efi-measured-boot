@@ -324,7 +324,7 @@ read_efi_vars() {
 create_emboot_efi_entry() {
     local loader_basename=$1
     local tag=$2
-    local efidevinfo=( $("$APPDIR"/get_device_info "$EFI_MOUNT") )
+    local efidevinfo=( $(get_device_info "$EFI_MOUNT") )
     local efi_disk_and_part=( $(device_to_disk_and_partition "${efidevinfo[1]}") )
     local efidisk=${efi_disk_and_part[0]}
     local efipartition=${efi_disk_and_part[1]}
