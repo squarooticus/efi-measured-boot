@@ -5,7 +5,7 @@ setup_tmp_dir() {
 }
 
 is_true() {
-    case "$(echo "$1" | tr A-Z a-z)" in
+    case "$(printf %s "$1" | tr A-Z a-z)" in
         y*|t*|1)
             return 0
             ;;
@@ -16,21 +16,92 @@ is_true() {
     return 0
 }
 
-NEED_UMOUNT_EFI=''
-
-mount_efi() {
-    if ! grep -qs "$EFI_MOUNT " /proc/mounts; then
-        mkdir -p "$EFI_MOUNT"
-        mount -r -n "$EFI_PART" "$EFI_MOUNT"
-        NEED_UMOUNT_EFI=1
+b64encode() {
+    local wrap=65
+    local OPTIND
+    local OPTARG
+    while getopts 'w:' opt; do
+        case "$opt" in
+            w) wrap=$OPTARG ;;
+            :) echo "$OPTARG requires an argument" 1>&2; return 1;;
+            ?) echo "unknown argument" 1>&2; return 1;;
+        esac
+    done
+    if [ "$wrap" = 0 ]; then
+        wrap=''
     fi
+    shift $((OPTIND-1))
+    hexdump -v -e '2/1 "%02x"' | \
+        sed -e 's/0/0000 /g;s/1/0001 /g;s/2/0010 /g;s/3/0011 /g;
+                s/4/0100 /g;s/5/0101 /g;s/6/0110 /g;s/7/0111 /g;
+                s/8/1000 /g;s/9/1001 /g;s/a/1010 /g;s/b/1011 /g;
+                s/c/1100 /g;s/d/1101 /g;s/e/1110 /g;s/f/1111 /g;' | \
+        tr -d ' ' | \
+        sed -e 's/[01]\{6\}/\0 /g' | \
+        sed -e 's_000000_A_g; s_000001_B_g; s_000010_C_g; s_000011_D_g;
+                s_000100_E_g; s_000101_F_g; s_000110_G_g; s_000111_H_g;
+                s_001000_I_g; s_001001_J_g; s_001010_K_g; s_001011_L_g;
+                s_001100_M_g; s_001101_N_g; s_001110_O_g; s_001111_P_g;
+                s_010000_Q_g; s_010001_R_g; s_010010_S_g; s_010011_T_g;
+                s_010100_U_g; s_010101_V_g; s_010110_W_g; s_010111_X_g;
+                s_011000_Y_g; s_011001_Z_g; s_011010_a_g; s_011011_b_g;
+                s_011100_c_g; s_011101_d_g; s_011110_e_g; s_011111_f_g;
+                s_100000_g_g; s_100001_h_g; s_100010_i_g; s_100011_j_g;
+                s_100100_k_g; s_100101_l_g; s_100110_m_g; s_100111_n_g;
+                s_101000_o_g; s_101001_p_g; s_101010_q_g; s_101011_r_g;
+                s_101100_s_g; s_101101_t_g; s_101110_u_g; s_101111_v_g;
+                s_110000_w_g; s_110001_x_g; s_110010_y_g; s_110011_z_g;
+                s_110100_0_g; s_110101_1_g; s_110110_2_g; s_110111_3_g;
+                s_111000_4_g; s_111001_5_g; s_111010_6_g; s_111011_7_g;
+                s_111100_8_g; s_111101_9_g; s_111110_+_g; s_111111_/_g;
+
+                s_0000_A=_g;  s_0001_E=_g;  s_0010_I=_g;  s_0011_M=_g;
+                s_0100_Q=_g;  s_0101_U=_g;  s_0110_Y=_g;  s_0111_c=_g;
+                s_1000_g=_g;  s_1001_k=_g;  s_1010_o=_g;  s_1011_s=_g;
+                s_1100_w=_g;  s_1101_0=_g;  s_1110_4=_g;  s_1111_8=_g;
+
+                s_00_A==_;    s_01_Q==_;    s_10_g==_;    s_11_w==_;' | \
+                tr -d ' ' | \
+                if [ -n "$wrap" ]; then sed -e 's/.\{'"$wrap"'\}/\0\n/g'; else cat; fi
+        if [ -n "$wrap" ]; then
+            echo
+        fi
 }
 
-umount_efi() {
-    if [ -n "$NEED_UMOUNT_EFI" ]; then
-        umount -n "$EFI_MOUNT"
-        NEED_UMOUNT_EFI=''
-    fi
+b64decode() {
+    /usr/bin/printf "$(
+    tr -d '\n' | \
+    sed -e 's_A==_@@_;    s_Q==_@,_;    s_g==_,@_;    s_w==_,,_;
+
+            s_A=_@@@@_;  s_E=_@@@,_;  s_I=_@@,@_;  s_M=_@@,,_;
+            s_Q=_@,@@_;  s_U=_@,@,_;  s_Y=_@,,@_;  s_c=_@,,,_;
+            s_g=_,@@@_;  s_k=_,@@,_;  s_o=_,@,@_;  s_s=_,@,,_;
+            s_w=_,,@@_;  s_@=_,,@,_;  s_4=_,,,@_;  s_8=_,,,,_;
+
+            s_A_@@@@@@_g; s_B_@@@@@,_g; s_C_@@@@,@_g; s_D_@@@@,,_g;
+            s_E_@@@,@@_g; s_F_@@@,@,_g; s_G_@@@,,@_g; s_H_@@@,,,_g;
+            s_I_@@,@@@_g; s_J_@@,@@,_g; s_K_@@,@,@_g; s_L_@@,@,,_g;
+            s_M_@@,,@@_g; s_N_@@,,@,_g; s_O_@@,,,@_g; s_P_@@,,,,_g;
+            s_Q_@,@@@@_g; s_R_@,@@@,_g; s_S_@,@@,@_g; s_T_@,@@,,_g;
+            s_U_@,@,@@_g; s_V_@,@,@,_g; s_W_@,@,,@_g; s_X_@,@,,,_g;
+            s_Y_@,,@@@_g; s_Z_@,,@@,_g; s_a_@,,@,@_g; s_b_@,,@,,_g;
+            s_c_@,,,@@_g; s_d_@,,,@,_g; s_e_@,,,,@_g; s_f_@,,,,,_g;
+            s_g_,@@@@@_g; s_h_,@@@@,_g; s_i_,@@@,@_g; s_j_,@@@,,_g;
+            s_k_,@@,@@_g; s_l_,@@,@,_g; s_m_,@@,,@_g; s_n_,@@,,,_g;
+            s_o_,@,@@@_g; s_p_,@,@@,_g; s_q_,@,@,@_g; s_r_,@,@,,_g;
+            s_s_,@,,@@_g; s_t_,@,,@,_g; s_u_,@,,,@_g; s_v_,@,,,,_g;
+            s_w_,,@@@@_g; s_x_,,@@@,_g; s_y_,,@@,@_g; s_z_,,@@,,_g;
+            s_0_,,@,@@_g; s_1_,,@,@,_g; s_2_,,@,,@_g; s_3_,,@,,,_g;
+            s_4_,,,@@@_g; s_5_,,,@@,_g; s_6_,,,@,@_g; s_7_,,,@,,_g;
+            s_8_,,,,@@_g; s_9_,,,,@,_g; s_+_,,,,,@_g; s_/_,,,,,,_g;' | \
+        sed -e 's/[,@]\{4\}/\0 /g' | \
+        sed -e 's/@@@@/0/g; s/@@@,/1/g; s/@@,@/2/g; s/@@,,/3/g;
+                s/@,@@/4/g; s/@,@,/5/g; s/@,,@/6/g; s/@,,,/7/g;
+                s/,@@@/8/g; s/,@@,/9/g; s/,@,@/a/g; s/,@,,/b/g;
+                s/,,@@/c/g; s/,,@,/d/g; s/,,,@/e/g; s/,,,,/f/g;' | \
+        tr -d ' ' | \
+        sed -e 's/../\\x\0/g'
+        )"
 }
 
 increment_counter() {
@@ -46,31 +117,32 @@ read_pcrs() {
 }
 
 create_provision_context() {
-    tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "${1:-.}"/provision.ctx
+    local workdir=${1:-.}
+    tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$workdir"/provision.ctx
 }
 
 emboot_loader_unix_path() {
-    echo "$EFI_MOUNT/EFI/$OS_SHORT_NAME/${1:-emboot.efi}"
+    printf %s\\n "$EFI_MOUNT/EFI/$OS_SHORT_NAME/${1:-emboot.efi}"
 }
 
 emboot_loader_path() {
-    echo '\EFI\'"$OS_SHORT_NAME"'\'"${1:-emboot.efi}"
+    printf %s\\n '\EFI\'"$OS_SHORT_NAME"'\'"${1:-emboot.efi}"
 }
 
 efi_path_to_unix() {
-    echo -n "$EFI_MOUNT"
-    echo "$@" | sed -e 's/\\/\//g'
+    printf %s "$EFI_MOUNT"
+    printf %s%s\\n "$1" | sed -e 's/\\/\//g'
 }
 
-emboot_state_path() {
-    echo "$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot${1:+/$1}"
+emboot_state_file() {
+    printf %s "$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot.state"
 }
 
 create_efi_app() {
-    kernel=$1
-    initrd=$2
-    kcli=$3
-    output=$4
+    local kernel=$1
+    local initrd=$2
+    local kcli=$3
+    local output=$4
     objcopy --add-section .osrel="/usr/lib/os-release" --change-section-vma .osrel=0x20000 \
         --add-section .cmdline="$kcli" --change-section-vma .cmdline=0x30000 \
         --add-section .linux="$kernel" --change-section-vma .linux=0x2000000 \
@@ -79,13 +151,14 @@ create_efi_app() {
 }
 
 predict_future_pcrs() {
-    workdir=${1:-.}
+    local workdir=${1:-.}
     shift
     tpm_futurepcr -L "$SEAL_PCRS" -H sha256 "$@" -o "$workdir"/pcrs -v
 }
 
 seal_data() {
-    workdir=${1:-.}
+    local workdir=${1:-.}
+    rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
     tpm2_startauthsession -S "$workdir"/session.ctx
     tpm2_policypcr -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs
     tpm2_policynv -S "$workdir"/session.ctx -C o -i "$workdir"/counter -L "$workdir"/policy "$COUNTER_HANDLE" ule
@@ -95,8 +168,31 @@ seal_data() {
     rm -f "$workdir"/session.ctx
 }
 
+list_luks_token_ids() {
+    local cryptdev=$1
+    local krel=$2
+    cryptsetup luksDump "$cryptdev" --dump-json-metadata | jq -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'"${krel:+ and .\"value\".\"krel\" == \"$krel\"}"')) | map(.key) | join(" ")'
+}
+
+export_luks_seal_metadata() {
+    local workdir=${1:-.}
+    local cryptdev=$2
+    local token_id=$3
+    md=$(cryptsetup token export "$cryptdev" --token-id "$token_id" 2>/dev/null)
+    if [ -z "$md" ]; then
+        return 1
+    fi
+    for k in counter pcrs sealed.priv sealed.pub; do
+        rm -f "$workdir/$k"
+        printf %s "$md" | jq -j ".\"$k\"" | b64decode >"$workdir/$k"
+    done
+    return 0
+}
+
 unseal_data() {
-    workdir=${1:-.}
+    local workdir=${1:-.}
+    local -; set +e
+
     if [ ! -r "$workdir"/pcrs ]; then
         read_pcrs "$workdir"/pcrs
     fi
@@ -109,7 +205,7 @@ unseal_data() {
         tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
         tpm2_policynv -Q -C o -S "$workdir"/session.ctx -i "$workdir"/counter "$COUNTER_HANDLE" ule && \
         tpm2_unseal -Q -c "$workdir"/load.ctx -p session:"$workdir"/session.ctx
-    rc=$?
+    local rc=$?
     if [ -e "$workdir"/session.ctx ]; then
         tpm2_flushcontext -Q "$workdir"/session.ctx
     fi

@@ -11,10 +11,10 @@ if [[ $cmd = ./* ]]; then APPDIR=.; fi
 
 set -e
 
-TMPDIR=$(setup_tmp_dir)
+tmpdir=$(setup_tmp_dir)
 
 cleanup() {
-    [ -n "$TMPDIR" ] && rm -rf "$TMPDIR"
+    [ -n "$tmpdir" ] && rm -rf "$tmpdir"
 }
 
 trap cleanup EXIT
@@ -32,18 +32,18 @@ if [[ $cryptopts != *keyscript=*emboot_unseal.sh* ]]; then
     exit 1
 fi
 
-echo "root=UUID=${rootdev[0]} cryptdevice=${cryptdev[1]}:${cryptdev[0]} $KERNEL_PARAMS" >"$TMPDIR"/kernel-command-line.txt
+echo "root=UUID=${rootdev[0]} cryptdevice=${cryptdev[1]}:${cryptdev[0]} $KERNEL_PARAMS" >"$tmpdir"/kernel-command-line.txt
 
 kernels=( $(list_installed_kernels) )
 
-statefile=$(emboot_state_path)/state
+statefile=$(emboot_state_file)
 rm -f "$statefile"
 
 if [ -n "${kernels[0]}" ]; then
     kfn=$(basename "${kernels[0]}")
     krel=${kfn#vmlinuz-}
-    create_efi_app "${kernels[0]}" /boot/initrd.img-"$krel" "$TMPDIR"/kernel-command-line.txt "$TMPDIR"/linux.efi
-    cp -f "$TMPDIR"/linux.efi $(emboot_loader_unix_path)
+    create_efi_app "${kernels[0]}" /boot/initrd.img-"$krel" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
+    cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path)
     echo "primary=$(quote_args "$krel")" >"$statefile"
     echo "Primary EFI kernel is $krel" 1>&2
 fi
@@ -51,8 +51,8 @@ fi
 if [ -n "${kernels[1]}" ]; then
     kfn=$(basename "${kernels[1]}")
     krel=${kfn#vmlinuz-}
-    create_efi_app "${kernels[1]}" /boot/initrd.img-"$krel" "$TMPDIR"/kernel-command-line.txt "$TMPDIR"/linux.efi
-    cp -f "$TMPDIR"/linux.efi $(emboot_loader_unix_path emboot_old.efi)
+    create_efi_app "${kernels[1]}" /boot/initrd.img-"$krel" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
+    cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path emboot_old.efi)
     echo "old=$(quote_args "$krel")" >>"$statefile"
     echo "Old EFI kernel is $krel" 1>&2
 fi
