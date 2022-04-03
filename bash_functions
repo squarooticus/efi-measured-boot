@@ -9,28 +9,29 @@ quote_args() {
     local w
     for w; do
         if [ -n "$w" -a -z "${w//[0-9a-zA-Z_,.:=$fs-]}" ]; then
-            echo -n "$space$w"
+            printf %s "$space$w"
         else
             qw="'${w//$sq/$sq$dq$sq$dq$sq}'"
             qw=${qw//$sq$sq}
-            echo -n "$space${qw:-$sq$sq}"
+            printf %s "$space${qw:-$sq$sq}"
         fi
         space=" "
     done
 }
 
 quote_bre() {
-    echo "$1" | sed -e 's/[]\\^$*.[]/\\\0/g'
+    printf %s "$1" | sed -e 's/[]\\^$*.[]/\\\0/g'
 }
 
 any_of_bre() {
-    quoted=""
-    oor=""
+    local quoted=""
+    local oor=""
+    local w
     for w; do
         quoted=$quoted$oor$(quote_bre "$w")
         oor='\|'
     done
-    echo "$quoted"
+    printf %s "$quoted"
 }
 
 parse_yaml() {
@@ -80,13 +81,13 @@ device_to_disk_and_partition() {
         return 1
     fi
     local disk=/dev/${parents[0]}
-    local part=$(echo "$dev" | grep -o '[0-9]\+$')
+    local part=$(printf %s "$dev" | grep -o '[0-9]\+$')
     local checkuuid=$(sgdisk "$disk" -i "$part" | grep -i 'Partition unique GUID' | sed 's/^.*://; s/[[:space:]]\+//g' | tr a-z A-Z)
     if [[ $devpartuuid != "$checkuuid" ]]; then
         echo "$dev somehow not $disk partition $part: PARTUUID mismatch ($devpartuuid vs $checkuuid)" 1>&2
         return 1
     fi
-    echo "$disk $part"
+    printf %s "$disk $part"
 }
 
 # Compares two dot-delimited decimal-element version numbers a and b that may
@@ -176,35 +177,36 @@ compare_versions() {
 # compare_versions above.
 qsort() {
     local aname=$1
+    declare -n aref=$aname
     local compare=$2
     local start=${3:-0}
-    local end=${4:-$(( $(eval "echo \${#$aname[@]}") - 1 ))}
+    local end=${4:-$(( ${#aref[@]} - 1 ))}
 
     # Algorithm based on Hoare partitioning pseudocode at
     # https://en.wikipedia.org/wiki/Quicksort
     if (( start >= end )); then
         return
     fi
-    eval "local pivot=\${$aname[\$start]}"
+    local pivot=${aref[$start]}
     local i=$(( start - 1 ))
     local j=$(( end + 1 ))
     local cmpi cmpj
     while true; do
         (( i++ ))
-        eval "$compare \"\${$aname[\$i]}\" \"\$pivot\""
+        $compare "${aref[$i]}" "$pivot"
         cmpi=$?
         while (( cmpi < 2 )); do
             (( i++ ))
-            eval "$compare \"\${$aname[\$i]}\" \"\$pivot\""
+            $compare "${aref[$i]}" "$pivot"
             cmpi=$?
         done
 
         (( j-- ))
-        eval "$compare \"\${$aname[\$j]}\" \"\$pivot\""
+        $compare "${aref[$j]}" "$pivot"
         cmpj=$?
         while (( cmpj > 2 )); do
             (( j-- ))
-            eval "$compare \"\${$aname[\$j]}\" \"\$pivot\""
+            $compare "${aref[$j]}" "$pivot"
             cmpj=$?
         done
 
@@ -212,9 +214,9 @@ qsort() {
             break
         fi
 
-        eval "local swap=\${$aname[\$i]}"
-        eval "$aname[\$i]=\${$aname[\$j]}"
-        eval "$aname[\$j]=\$swap"
+        local swap=${aref[$i]}
+        aref[$i]=${aref[$j]}
+        aref[$j]=$swap
     done
     qsort "$aname" "$compare" $start $j
     qsort "$aname" "$compare" $(( j + 1 )) $end
@@ -246,13 +248,13 @@ get_crypttab_entry() {(
     fi
     if (( ${#crypttabentries[@]} > 1 )); then
         echo 'filesystem in multiple crypttab entries unsupported' 1>&2
-        IFS=$'\n'; echo "${crypttabentries[*]}"
+        IFS=$'\n'; printf %s\\n "${crypttabentries[*]}"
         exit 1
     fi
     local cryptdev=( ${crypttabentries[0]} )
 
     IFS=' '
-    echo "${cryptdev[*]}"
+    printf %s "${cryptdev[*]}"
 )}
 
 # Given a path, output `UUID device_node_path` for the containing filesystem.
@@ -270,7 +272,7 @@ get_device_info() {(
         exit 1
     fi
 
-    echo "${dev[0]} ${dev[1]}"
+    printf %s "${dev[0]} ${dev[1]}"
 )}
 
 # Output a space-separated list of kernel images in /boot in reverse order
@@ -291,7 +293,7 @@ list_installed_kernels() {
     qsort kvers kver_descending
 
     local IFS=" "
-    echo "${kvers[*]}"
+    printf %s "${kvers[*]}"
 }
 
 # Populates:
@@ -307,7 +309,7 @@ read_efi_vars() {
     local IFS=$'\t'
     local loader bootnum desc partuuid
     while read -r loader bootnum desc partuuid; do
-        efi_apps[$(echo -n "$loader" | tr a-z A-Z)]="$bootnum"$'\t'"$desc"$'\t'"$partuuid"$'\t'"$loader"
+        efi_apps[$(printf %s "$loader" | tr a-z A-Z)]="$bootnum"$'\t'"$desc"$'\t'"$partuuid"$'\t'"$loader"
     done < <(efibootmgr -v | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-fA-F-]\+\),.*File(\([^)]\+\)).*/\4\t\1\t\2\t\3/')
     declare -ga efi_boot_order
     local IFS=','
@@ -330,6 +332,49 @@ create_emboot_efi_entry() {
     efibootmgr -C -d "$efidisk" -p "$efipartition" -l "$loader" -L "$OS_SHORT_NAME emboot${tag:+ ($tag)}"
 }
 
+get_emboot_key_slot() {
+    local cryptdev=$1
+    local emboot_token_ids=( $(list_luks_token_ids "$cryptdev") )
+    if (( ${#emboot_token_ids[@]} > 0 )); then
+        local one_token_id=${emboot_token_ids[0]}
+        local first_keyslot=$(cryptsetup luksDump "$cryptdev" --dump-json-metadata | jq -j '.tokens."'"$one_token_id"'".keyslots | first')
+        if [ -n "$first_keyslot" -a "$first_keyslot" != "null" ]; then
+            printf %s "$first_keyslot"
+            return 0
+        fi
+    fi
+    local keyslots=( $(cryptsetup luksDump "$cryptdev" --dump-json-metadata | jq -j '.keyslots | keys | join(" ")') )
+    local i
+    for i in "${keyslots[@]}"; do
+        if </dev/null cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" --key-slot "$i" "$cryptdev" >/dev/null 2>&1; then
+            printf %s "$i"
+            return 0
+        fi
+    done
+    return 1
+}
+
+import_luks_seal_metadata() {
+    local workdir=${1:-.}
+    local cryptdev=$2
+    local krel=$3
+    declare -a args
+    local json=''
+    local k
+    for k in counter pcrs sealed.priv sealed.pub; do
+        <$workdir/$k b64encode -w 0 >$workdir/$k.b64
+        args+=( --rawfile "${k//./_}" "$workdir/$k.b64" )
+        json+=", \"$k\": \$${k//./_}"
+    done
+    local keyslot=$(get_emboot_key_slot "$cryptdev")
+    jq --null-input "${args[@]}" --arg krel "$krel" --arg keyslot "$keyslot" --arg updated "$(date +%s)" '{ "type": "emboot", "keyslots": [ $keyslot ], "krel": $krel, "updated": $updated'"$json"' }' >"$workdir"/token.json
+    local current_token_ids=( $(list_luks_token_ids "$cryptdev" "$krel") )
+    for k in "${current_token_ids[@]}"; do
+        cryptsetup token remove "$cryptdev" --token-id "$k"
+    done
+    cryptsetup token import "$cryptdev" --json-file "$workdir"/token.json
+}
+
 # Given a working directory (or $PWD if empty), a path to a loader, and a
 # kernel release string (of the form returned by uname -r), seals the LUKS
 # passphrase to the loader by predicting future PCR values based on the UEFI
@@ -337,12 +382,17 @@ create_emboot_efi_entry() {
 # booted from either the primary or old emboot boot entry.
 seal_to_loader() {
     local workdir=${1:-.}
-    local loader=$2
-    local krel=$3
+    local cryptdev=$2
+    local loader=$3
+    local krel=$4
 
     read_efi_vars
-    local oldIFS=$IFS; local IFS=$'\t'; primary_entry=( ${efi_apps[$(emboot_loader_path | tr a-z A-Z)]} ); IFS=$oldIFS
-    oldIFS=$IFS; IFS=$'\t'; old_entry=( ${efi_apps[$(emboot_loader_path emboot_old.efi | tr a-z A-Z)]} ); IFS=$oldIFS
+
+    local oldIFS=$IFS
+    local IFS=$'\t'
+    primary_entry=( ${efi_apps[$(emboot_loader_path | tr a-z A-Z)]} )
+    old_entry=( ${efi_apps[$(emboot_loader_path emboot_old.efi | tr a-z A-Z)]} )
+    IFS=$oldIFS
 
     if [[ ${primary_entry[0]} == "$efi_boot_current" ]]; then
         current_loader=${primary_entry[3]}
@@ -353,9 +403,7 @@ seal_to_loader() {
         return 1
     fi
 
-    rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
     predict_future_pcrs "$workdir" --substitute-bsa-unix-path "$(efi_path_to_unix "$current_loader")=$loader"
     seal_data "$workdir" <$LUKS_KEY
-    mkdir -p $(emboot_state_path "$krel")
-    cp -f "$workdir"/pcrs "$workdir"/counter "$workdir"/sealed.pub "$workdir"/sealed.priv "$(emboot_state_path "$krel")/"
+    import_luks_seal_metadata "$workdir" "$cryptdev" "$krel"
 }

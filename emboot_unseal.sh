@@ -11,8 +11,6 @@ tmpdir=
 
 fallback() {
     echo "$(basename "$cmd") failed with exit code $rc"
-    umount_efi
-    test -n "$oldpwd" && cd "$oldpwd"
     test -n "$tmpdir" && rm -rf "$tmpdir"
     exec "$keyscript" "$keyscriptarg" 1>&3 3>&-
 }
@@ -28,22 +26,19 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
 
     tmpdir=$(setup_tmp_dir)
 
-    mount_efi
-    cp -f "$(emboot_state_path "$(uname -r)")"/* "$tmpdir/"
-    umount_efi
+    for tid in $(list_luks_token_ids "$CRYPTTAB_SOURCE" "$(uname -r)"); do
+        export_luks_seal_metadata "$tmpdir" "$CRYPTTAB_SOURCE" "$tid"
 
-    oldpwd=$(pwd)
-    cd "$tmpdir"
+        create_provision_context "$tmpdir"
+        if unseal_data "$tmpdir" 1>&3 3>&-; then
+            echo "$(basename "$cmd")${CRYPTTAB_SOURCE:+ of $CRYPTTAB_SOURCE} succeeded${CRYPTTAB_NAME:+ for $CRYPTTAB_NAME} using token ID $tid"
+            exit 0
+        fi
+        echo "$(basename "$cmd")${CRYPTTAB_SOURCE:+ of $CRYPTTAB_SOURCE} failed${CRYPTTAB_NAME:+ for $CRYPTTAB_NAME} using token ID $tid"
+    done
 
-    create_provision_context
-    if unseal_data 1>&3 3>&-; then
-        echo "$(basename "$cmd") succeeded${CRYPTTAB_NAME:+ for $CRYPTTAB_NAME}"
-        exit 0
-    fi
-
-    cd "$oldpwd"
     rm -rf "$tmpdir"
-    echo "$(basename "$cmd") failed${CRYPTTAB_NAME:+ for $CRYPTTAB_NAME}"
+    echo "Falling back to passphrase entry"
 fi
 
 exec "$keyscript" "$keyscriptarg" 1>&3 3>&-

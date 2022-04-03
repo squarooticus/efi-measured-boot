@@ -43,8 +43,13 @@ check_root_luks() {
     if (( ${#cryptdev[@]} == 0 )); then
         echo "Root has no parent crypttab entry" 1>&2
         return 1
-    elif [[ ${cryptdev[3]} != *luks* ]]; then
+    fi
+    if [[ ${cryptdev[3]} != *luks* ]]; then
         echo "crypttab entry missing luks option: ${cryptdev[3]}" 1>&2
+        return 1
+    fi
+    if ! cryptsetup isLuks "${cryptdev[1]}" --type luks2; then
+        echo "Root must be hosted on a LUKS2 partition"
         return 1
     fi
 }
@@ -71,7 +76,7 @@ check_packages() {
 }
 
 check_binaries() {
-    for bin in sgdisk efibootmgr cryptsetup sed awk tr grep sort uniq diff basename dirname mount umount tpm2_create tpm2_createprimary tpm2_flushcontext tpm2_load tpm2_nvdefine tpm2_nvincrement tpm2_nvread tpm2_nvreadpublic tpm2_pcrread tpm2_policynv tpm2_policypcr tpm2_shutdown tpm2_startauthsession tpm2_unseal lsblk objcopy pip3 update-initramfs dd; do
+    for bin in sgdisk efibootmgr cryptsetup sed awk tr grep sort uniq diff basename dirname mount tpm2_create tpm2_createprimary tpm2_flushcontext tpm2_load tpm2_nvdefine tpm2_nvincrement tpm2_nvread tpm2_nvreadpublic tpm2_pcrread tpm2_policynv tpm2_policypcr tpm2_shutdown tpm2_startauthsession tpm2_unseal lsblk objcopy pip3 update-initramfs dd jq; do
         if [ -z "$(type -Pt "$bin")" ]; then
             echo "Cannot find $bin in path" 1>&2
             return 1
