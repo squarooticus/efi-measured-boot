@@ -1,7 +1,7 @@
 #! /bin/bash
 
 SYSTEMD_STUB=/usr/lib/systemd/boot/efi/linuxx64.efi.stub
-CHECKS=( root arch no_separate_boot mounted_efi root_luks systemd_stub tpm packages binaries )
+CHECKS=( root arch no_separate_boot mounted_efi root_luks systemd_stub tpm packages binaries cryptsetup_version )
 
 . ./functions
 . ./bash_functions
@@ -82,6 +82,14 @@ check_binaries() {
             return 1
         fi
     done
+}
+
+check_cryptsetup_version() {
+    cver=$(cryptsetup -V | awk '{print $2;}')
+    if compare_versions "$cver" 2.4.0 || (( $? == 1 )); then
+        echo "cryptsetup version must be >= 2.4.0 (for --dump-json-metadata support)" 1>&2
+        return 1
+    fi
 }
 
 set -e
