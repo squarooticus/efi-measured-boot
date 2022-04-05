@@ -2,7 +2,7 @@
 
 cmd=$0
 
-exec 3>&1 1>&2
+exec 3>&1 >&2
 
 [ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
 if [[ $cmd = ./* ]]; then APPDIR=.; fi
@@ -42,19 +42,19 @@ rm -f "$statefile"
 if [ -n "${kernels[0]}" ]; then
     kfn=$(basename "${kernels[0]}")
     krel=${kfn#vmlinuz-}
+    echo "Creating primary EFI loader for $krel"
     create_efi_app "${kernels[0]}" /boot/initrd.img-"$krel" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
     cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path)
     echo "primary=$(quote_args "$krel")" >"$statefile"
-    echo "Primary EFI kernel is $krel" 1>&2
 fi
 
 if [ -n "${kernels[1]}" ]; then
     kfn=$(basename "${kernels[1]}")
     krel=${kfn#vmlinuz-}
+    echo "Creating old EFI loader for $krel"
     create_efi_app "${kernels[1]}" /boot/initrd.img-"$krel" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
     cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path emboot_old.efi)
     echo "old=$(quote_args "$krel")" >>"$statefile"
-    echo "Old EFI kernel is $krel" 1>&2
 fi
 
 exit 0

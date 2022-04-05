@@ -57,8 +57,8 @@ b64encode() {
     while getopts 'w:' opt; do
         case "$opt" in
             w) wrap=$OPTARG ;;
-            :) echo "$OPTARG requires an argument" 1>&2; return 1;;
-            ?) echo "unknown argument" 1>&2; return 1;;
+            :) echo "$OPTARG requires an argument" >&2; return 1;;
+            ?) echo "unknown argument" >&2; return 1;;
         esac
     done
     if [ "$wrap" = 0 ]; then
@@ -187,18 +187,18 @@ create_efi_app() {
 predict_future_pcrs() {
     local workdir=${1:-.}
     shift
-    tpm_futurepcr -L "$SEAL_PCRS" -H sha256 "$@" -o "$workdir"/pcrs -v
+    tpm_futurepcr -L "$SEAL_PCRS" -H sha256 "$@" -o "$workdir"/pcrs
 }
 
 seal_data() {
     local workdir=${1:-.}
     rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
-    tpm2_startauthsession -S "$workdir"/session.ctx
-    tpm2_policypcr -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs
-    tpm2_policynv -S "$workdir"/session.ctx -C o -i "$workdir"/counter -L "$workdir"/policy "$COUNTER_HANDLE" ule
-    tpm2_create -C "$workdir"/provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - \
+    tpm2_startauthsession -Q -S "$workdir"/session.ctx
+    tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs
+    tpm2_policynv -Q -S "$workdir"/session.ctx -C o -i "$workdir"/counter -L "$workdir"/policy "$COUNTER_HANDLE" ule
+    tpm2_create -Q -C "$workdir"/provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - \
         -L "$workdir"/policy -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub
-    tpm2_flushcontext "$workdir"/session.ctx
+    tpm2_flushcontext -Q "$workdir"/session.ctx
     rm -f "$workdir"/session.ctx
 }
 
@@ -233,8 +233,8 @@ unseal_data() {
     if [ ! -r "$workdir"/counter ]; then
         read_counter >"$workdir"/counter
     fi
-    tpm2_load -Q -C "$workdir"/provision.ctx \
-            -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub -c "$workdir"/load.ctx && \
+    tpm2_load -Q -C "$workdir"/provision.ctx -r "$workdir"/sealed.priv \
+            -u "$workdir"/sealed.pub -c "$workdir"/load.ctx && \
         tpm2_startauthsession -Q -S "$workdir"/session.ctx --policy-session && \
         tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
         tpm2_policynv -Q -C o -S "$workdir"/session.ctx -i "$workdir"/counter "$COUNTER_HANDLE" ule && \

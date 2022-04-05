@@ -1,6 +1,6 @@
 #! /bin/bash
 
-exec 3>&1 1>&2
+exec 3>&1 >&2
 
 . ./functions
 . ./bash_functions
@@ -68,7 +68,7 @@ rm -f /etc/crypttab.pre_emboot
 revert_changes() {
     echo "CLEANING UP"
     if [ -e /etc/crypttab.pre_emboot ]; then
-        echo "reverting crypttab" 1>&2
+        echo "reverting crypttab" >&2
         mv -f /etc/crypttab.pre_emboot /etc/crypttab
     fi
     rm -f "$cfgfile.new"

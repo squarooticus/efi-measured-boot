@@ -24,16 +24,16 @@ provision_counter() {
         eval "$(tpm2_nvreadpublic "$COUNTER_HANDLE" | parse_yaml '' nvmd_)"
         invar=nvmd_$(printf "0x%x" $COUNTER_HANDLE)_attributes_value
         if [ -z "${!invar}" ]; then
-            echo "Cannot parse attributes for NV index $COUNTER_HANDLE" 1>&2
+            echo "Cannot parse attributes for NV index $COUNTER_HANDLE" >&2
             return 1
         elif [[ ${!invar} != "0x12000222" ]]; then
-            echo "Conflicting counter with invalid attributes at NV index $COUNTER_HANDLE" 1>&2
+            echo "Conflicting counter with invalid attributes at NV index $COUNTER_HANDLE" >&2
             return 1
         fi
-        echo "Using existing counter at NV index $COUNTER_HANDLE" 1>&2
+        echo "Using existing counter at NV index $COUNTER_HANDLE" >&2
     else
         if ! tpm2_nvdefine "$COUNTER_HANDLE" -C o -s 8 -a 'ownerread|ownerwrite|no_da|nt=counter'; then
-            echo "Unable to create counter at NV index $COUNTER_HANDLE" 1>&2
+            echo "Unable to create counter at NV index $COUNTER_HANDLE" >&2
             return 1
         fi
     fi
@@ -45,14 +45,14 @@ device_to_disk_and_partition() {
     local devpartuuid=$(lsblk -n -o PARTUUID -r "$dev" | tr a-z A-Z)
     local parents=( $(lsblk -s -n -o NAME -r "$dev" | tail -n +2) )
     if (( ${#parents[@]} != 1 )); then
-        echo "Do not know how to handle $dev with other than one parent: ${parents[*]}" 1>&2
+        echo "Do not know how to handle $dev with other than one parent: ${parents[*]}" >&2
         return 1
     fi
     local disk=/dev/${parents[0]}
     local part=$(printf %s "$dev" | grep -o '[0-9]\+$')
     local checkuuid=$(sgdisk "$disk" -i "$part" | grep -i 'Partition unique GUID' | sed 's/^.*://; s/[[:space:]]\+//g' | tr a-z A-Z)
     if [[ $devpartuuid != "$checkuuid" ]]; then
-        echo "$dev somehow not $disk partition $part: PARTUUID mismatch ($devpartuuid vs $checkuuid)" 1>&2
+        echo "$dev somehow not $disk partition $part: PARTUUID mismatch ($devpartuuid vs $checkuuid)" >&2
         return 1
     fi
     printf %s "$disk $part"
@@ -203,7 +203,7 @@ get_crypttab_entry() {(
     local IFS=$'\n'
     local crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep 'UUID=\('"$(any_of_bre "${parentdevices[@]}")"'\)' || true) )
     if (( ${#parentdevices[@]} == 0 || ${#crypttabentries[@]} == 0 )); then
-        echo 'crypttab entry not found via UUID; trying node' 1>&2
+        echo 'crypttab entry not found via UUID; trying node' >&2
         IFS=$OLDIFS
         local parentdevices=( $(lsblk -p -s -t $devnode -o NAME -n -r | grep '.' | sort | uniq) )
         IFS=$'\n'
@@ -211,11 +211,11 @@ get_crypttab_entry() {(
     fi
     IFS=$OLDIFS
     if (( ${#parentdevices[@]} == 0 || ${#crypttabentries[@]} == 0 )); then
-        echo 'crypttab entry not found' 1>&2
+        echo 'crypttab entry not found' >&2
         exit 1
     fi
     if (( ${#crypttabentries[@]} > 1 )); then
-        echo 'filesystem in multiple crypttab entries unsupported' 1>&2
+        echo 'Filesystem in multiple crypttab entries unsupported' >&2
         IFS=$'\n'; printf %s\\n "${crypttabentries[*]}"
         exit 1
     fi
@@ -236,7 +236,7 @@ get_device_info() {(
 
     local dev=( $(lsblk -n -o UUID,PATH,MOUNTPOINT -r | awk '$3 == "'"$mount_point"'" { print $1 " " $2; }') )
     if (( ${#dev[@]} == 0 )); then
-        echo "no block device found with mount point $mount_point" 1>&2
+        echo "No block device found with mount point $mount_point" >&2
         exit 1
     fi
 
@@ -372,7 +372,7 @@ seal_to_loader() {
     elif [[ ${old_entry[0]} == "$efi_boot_current" ]]; then
         current_loader=${old_entry[3]}
     else
-        echo "Cannot seal under non-emboot boot chain (BootCurrent=$efi_boot_current)" 1>&2
+        echo "Cannot seal under non-emboot boot chain (BootCurrent=$efi_boot_current)" >&2
         return 1
     fi
 

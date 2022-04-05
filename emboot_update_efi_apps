@@ -2,7 +2,7 @@
 
 cmd=$0
 
-exec 3>&1 1>&2
+exec 3>&1 >&2
 
 [ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
 if [[ $cmd = ./* ]]; then APPDIR=.; fi
@@ -16,10 +16,10 @@ read_efi_vars
 for lbn in emboot.efi emboot_old.efi; do
     oldIFS=$IFS; IFS=$'\t'; entry=( ${efi_apps[$(emboot_loader_path "$lbn" | tr a-z A-Z)]} ); IFS=$oldIFS
     if [[ -n "${entry[0]}" ]]; then
-        echo "Existing EFI boot loader entry ${entry[0]} for $lbn" 1>&2
+        echo "Existing EFI boot loader entry ${entry[0]} for $lbn"
     else
         tag=$(echo -n "$lbn" | grep '_[^.]' | sed -e 's/^[^_]*_\([^.]\+\).*/\1/')
-        echo "Creating EFI boot loader entry for $lbn${tag:+ with tag $tag}" 1>&2
+        echo "Creating EFI boot loader entry for $lbn${tag:+ with tag $tag}"
         create_emboot_efi_entry "$lbn" "$tag"
     fi
 done

@@ -1,6 +1,6 @@
 #! /bin/bash
 
-exec 3>&1 1>&2
+exec 3>&1 >&2
 
 . /etc/efi-measured-boot/config
 . ./functions
@@ -30,27 +30,27 @@ update-initramfs -u -k all
 # Create a new key and add it to the LUKS header of the root partition
 mkdir -m 0700 -p $(dirname "$LUKS_KEY")
 if [ -e "$LUKS_KEY" ]; then
-    echo "Using existing key $LUKS_KEY" 1>&2
+    echo "Using existing key $LUKS_KEY" >&2
 else
-    echo "Generating new key for root partition LUKS header" 1>&2
+    echo "Generating new key for root partition LUKS header" >&2
     (umask 077 && dd if=/dev/urandom of="$LUKS_KEY" bs=128 count=1)
 fi
 if ! cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" "${cryptdev[1]}" </dev/null >/dev/null 2>&1; then
-    echo "You may be prompted to enter an existing LUKS passphrase for your root partition" 1>&2
+    echo "You may be prompted to enter an existing LUKS passphrase for your root partition" >&2
     cryptsetup luksAddKey "${cryptdev[1]}" "$LUKS_KEY"
 fi
 
-echo "Installing EFI blobs" 1>&2
+echo "Installing EFI blobs" >&2
 ./emboot_install
 
-echo "Adding EFI boot entries" 1>&2
+echo "Adding EFI boot entries" >&2
 ./emboot_update_efi_apps
 
-echo "Setting next EFI boot to latest emboot kernel blob" 1>&2
+echo "Setting next EFI boot to latest emboot kernel blob" >&2
 read_efi_vars
 bn=${efi_apps[$(emboot_loader_path | tr a-z A-Z)]%%$'\t'*}
 if [ -z "$bn" ]; then
-    echo "Can't find emboot EFI boot entry for $(emboot_loader_path)" 1>&2
+    echo "Can't find emboot EFI boot entry for $(emboot_loader_path)" >&2
     exit 1
 fi
 efibootmgr -n "$bn"

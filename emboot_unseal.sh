@@ -1,6 +1,6 @@
 #! /bin/sh
 
-exec 3>&1 1>&2
+exec 3>&1 >&2
 
 cmd=$0
 
@@ -12,7 +12,7 @@ tmpdir=
 fallback() {
     echo "$(basename "$cmd") failed with exit code $rc"
     test -n "$tmpdir" && rm -rf "$tmpdir"
-    exec "$keyscript" "$keyscriptarg" 1>&3 3>&-
+    exec "$keyscript" "$keyscriptarg" >&3 3>&-
 }
 
 trap 'rc=$?; [ "$rc" -eq 0 ] && exit 0; fallback' EXIT
@@ -30,7 +30,7 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
         export_luks_seal_metadata "$tmpdir" "$CRYPTTAB_SOURCE" "$tid"
 
         create_provision_context "$tmpdir"
-        if unseal_data "$tmpdir" 1>&3 3>&-; then
+        if unseal_data "$tmpdir" >&3 3>&-; then
             echo "$(basename "$cmd")${CRYPTTAB_SOURCE:+ of $CRYPTTAB_SOURCE} succeeded${CRYPTTAB_NAME:+ for $CRYPTTAB_NAME} using token ID $tid"
             exit 0
         fi
@@ -41,4 +41,4 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
     echo "Falling back to passphrase entry"
 fi
 
-exec "$keyscript" "$keyscriptarg" 1>&3 3>&-
+exec "$keyscript" "$keyscriptarg" >&3 3>&-

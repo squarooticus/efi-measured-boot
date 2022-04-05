@@ -8,32 +8,32 @@ CHECKS=( root arch no_separate_boot mounted_efi root_luks systemd_stub tpm packa
 
 check_root() {
     if test "$(id -u)" != 0; then
-        echo "Must run as root (e.g., using sudo)" 1>&2
+        echo "Must run as root (e.g., using sudo)" >&2
         return 1
     fi
 }
 
 check_arch() {
     if test "$(uname -m)" != "x86_64"; then
-        echo "Unsupported architecture $(uname -m)" 1>&2
+        echo "Unsupported architecture $(uname -m)" >&2
         return 1
     fi
 }
 
 check_no_separate_boot() {
     if test "$(stat -c '%m' /boot)" != "/"; then
-        echo "/boot not on root device unsupported" 1>&2
+        echo "/boot not on root device unsupported" >&2
         return 1
     fi
 }
 
 check_mounted_efi() {
     if test "$(stat -c '%m' /boot/efi)" != "/boot/efi"; then
-        echo "EFI system partition must be mounted at /boot/efi" 1>&2
+        echo "EFI system partition must be mounted at /boot/efi" >&2
         return 1
     elif test "$(stat -f -c '%T' /boot/efi)" != "msdos" -o \
         "$(mount | awk '$3 == "/boot/efi" { print $5; }')" != "vfat"; then
-        echo "Filesystem mounted at /boot/efi must be mounted as type vfat" 1>&2
+        echo "Filesystem mounted at /boot/efi must be mounted as type vfat" >&2
         return 1
     fi
 }
@@ -41,11 +41,11 @@ check_mounted_efi() {
 check_root_luks() {
     cryptdev=( $(get_crypttab_entry $(get_device_info / | awk '{print $2;}') ) )
     if (( ${#cryptdev[@]} == 0 )); then
-        echo "Root has no parent crypttab entry" 1>&2
+        echo "Root has no parent crypttab entry" >&2
         return 1
     fi
     if [[ ${cryptdev[3]} != *luks* ]]; then
-        echo "crypttab entry missing luks option: ${cryptdev[3]}" 1>&2
+        echo "crypttab entry missing luks option: ${cryptdev[3]}" >&2
         return 1
     fi
     if ! cryptsetup isLuks "${cryptdev[1]}" --type luks2; then
@@ -56,21 +56,21 @@ check_root_luks() {
 
 check_systemd_stub() {
     if ! test -r "$SYSTEMD_STUB"; then
-        echo "systemd EFI stub $SYSTEMD_STUB not available" 1>&2
+        echo "systemd EFI stub $SYSTEMD_STUB not available" >&2
         return 1
     fi
 }
 
 check_tpm() {
     if ! tpm2_pcrread -Q 2>/dev/null; then
-        echo "TPM does not appear to be available or working" 1>&2
+        echo "TPM does not appear to be available or working" >&2
         return 1
     fi
 }
 
 check_packages() {
     if (( $(dpkg-query -W -f='${Status}\n' initramfs-tools 2>/dev/null | grep -c "ok installed") < 1 )); then
-        echo "initramfs-tools required (dracut is not supported)" 1>&2
+        echo "initramfs-tools required (dracut is not supported)" >&2
         return 1
     fi
 }
@@ -78,7 +78,7 @@ check_packages() {
 check_binaries() {
     for bin in sgdisk efibootmgr cryptsetup sed awk tr grep sort uniq diff basename dirname mount tpm2_create tpm2_createprimary tpm2_flushcontext tpm2_load tpm2_nvdefine tpm2_nvincrement tpm2_nvread tpm2_nvreadpublic tpm2_pcrread tpm2_policynv tpm2_policypcr tpm2_shutdown tpm2_startauthsession tpm2_unseal lsblk objcopy pip3 update-initramfs dd jq; do
         if [ -z "$(type -Pt "$bin")" ]; then
-            echo "Cannot find $bin in path" 1>&2
+            echo "Cannot find $bin in path" >&2
             return 1
         fi
     done
@@ -87,7 +87,7 @@ check_binaries() {
 check_cryptsetup_version() {
     cver=$(cryptsetup -V | awk '{print $2;}')
     if compare_versions "$cver" 2.4.0 || (( $? == 1 )); then
-        echo "cryptsetup version must be >= 2.4.0 (for --dump-json-metadata support)" 1>&2
+        echo "cryptsetup version must be >= 2.4.0 (for --dump-json-metadata support)" >&2
         return 1
     fi
 }
@@ -95,7 +95,7 @@ check_cryptsetup_version() {
 set -e
 
 for c in "${CHECKS[@]}"; do
-    echo -n "$c..." 1>&2
+    echo -n "$c..." >&2
     eval "check_$c"
-    echo "SUCCESS" 1>&2
+    echo "SUCCESS" >&2
 done

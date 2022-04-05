@@ -2,7 +2,7 @@
 
 cmd=$0
 
-exec 3>&1 1>&2
+exec 3>&1 >&2
 
 [ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
 if [[ $cmd = ./* ]]; then APPDIR=.; fi
@@ -29,7 +29,9 @@ read_efi_vars
 rootdev=( $(get_device_info /) )
 cryptdev=( $(get_crypttab_entry "${rootdev[1]}") )
 
+echo "Sealing key to primary EFI loader"
 seal_to_loader "$tmpdir" "${cryptdev[1]}" "$(emboot_loader_unix_path)" "$primary"
+echo "Sealing key to old EFI loader"
 seal_to_loader "$tmpdir" "${cryptdev[1]}" "$(emboot_loader_unix_path emboot_old.efi)" "$old"
 
 exit 0
