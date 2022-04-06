@@ -1,5 +1,6 @@
 #! /bin/bash
 
+# Shell quotes with an attempt to make the result human-readable.
 quote_args() {
     local sq="'"
     local dq='"'
@@ -11,51 +12,12 @@ quote_args() {
         if [ -n "$w" -a -z "${w//[0-9a-zA-Z_,.:=$fs-]}" ]; then
             printf %s "$space$w"
         else
-            qw="'${w//$sq/$sq$dq$sq$dq$sq}'"
+            qw="$sq${w//$sq/$sq$dq$sq$dq$sq}$sq"
             qw=${qw//$sq$sq}
             printf %s "$space${qw:-$sq$sq}"
         fi
         space=" "
     done
-}
-
-provision_counter() {
-    if tpm2_nvreadpublic -Q "$COUNTER_HANDLE" 2>/dev/null; then
-        eval "$(tpm2_nvreadpublic "$COUNTER_HANDLE" | parse_yaml '' nvmd_)"
-        invar=nvmd_$(printf "0x%x" $COUNTER_HANDLE)_attributes_value
-        if [ -z "${!invar}" ]; then
-            echo "Cannot parse attributes for NV index $COUNTER_HANDLE" >&2
-            return 1
-        elif [[ ${!invar} != "0x12000222" ]]; then
-            echo "Conflicting counter with invalid attributes at NV index $COUNTER_HANDLE" >&2
-            return 1
-        fi
-        echo "Using existing counter at NV index $COUNTER_HANDLE" >&2
-    else
-        if ! tpm2_nvdefine "$COUNTER_HANDLE" -C o -s 8 -a 'ownerread|ownerwrite|no_da|nt=counter'; then
-            echo "Unable to create counter at NV index $COUNTER_HANDLE" >&2
-            return 1
-        fi
-    fi
-    tpm2_nvincrement -C o "$COUNTER_HANDLE" && tpm2_shutdown
-}
-
-device_to_disk_and_partition() {
-    local dev=$1
-    local devpartuuid=$(lsblk -n -o PARTUUID -r "$dev" | tr a-z A-Z)
-    local parents=( $(lsblk -s -n -o NAME -r "$dev" | tail -n +2) )
-    if (( ${#parents[@]} != 1 )); then
-        echo "Do not know how to handle $dev with other than one parent: ${parents[*]}" >&2
-        return 1
-    fi
-    local disk=/dev/${parents[0]}
-    local part=$(printf %s "$dev" | grep -o '[0-9]\+$')
-    local checkuuid=$(sgdisk "$disk" -i "$part" | grep -i 'Partition unique GUID' | sed 's/^.*://; s/[[:space:]]\+//g' | tr a-z A-Z)
-    if [[ $devpartuuid != "$checkuuid" ]]; then
-        echo "$dev somehow not $disk partition $part: PARTUUID mismatch ($devpartuuid vs $checkuuid)" >&2
-        return 1
-    fi
-    printf %s "$disk $part"
 }
 
 # Compares two dot-delimited decimal-element version numbers a and b that may
@@ -188,6 +150,50 @@ qsort() {
     done
     qsort "$aname" "$compare" $start $j
     qsort "$aname" "$compare" $(( j + 1 )) $end
+}
+
+# Provisions the monotonic counter used to prevent downgrade attacks, unless
+# one with the correct properties already exists. Errors if the NV handle is in
+# use with conflicting properties.
+provision_counter() {
+    if tpm2_nvreadpublic -Q "$COUNTER_HANDLE" 2>/dev/null; then
+        eval "$(tpm2_nvreadpublic "$COUNTER_HANDLE" | parse_yaml '' nvmd_)"
+        invar=nvmd_$(printf "0x%x" $COUNTER_HANDLE)_attributes_value
+        if [ -z "${!invar}" ]; then
+            echo "Cannot parse attributes for NV index $COUNTER_HANDLE" >&2
+            return 1
+        elif [[ ${!invar} != "0x12000222" ]]; then
+            echo "Conflicting counter with invalid attributes at NV index $COUNTER_HANDLE" >&2
+            return 1
+        fi
+        echo "Using existing counter at NV index $COUNTER_HANDLE" >&2
+    else
+        if ! tpm2_nvdefine "$COUNTER_HANDLE" -C o -s 8 -a 'ownerread|ownerwrite|no_da|nt=counter'; then
+            echo "Unable to create counter at NV index $COUNTER_HANDLE" >&2
+            return 1
+        fi
+    fi
+    tpm2_nvincrement -C o "$COUNTER_HANDLE" && tpm2_shutdown
+}
+
+# Given a device node, returns the disk node and partition number. Sanity
+# checks that the partition UUID of the input and output match.
+device_to_disk_and_partition() {
+    local dev=$1
+    local devpartuuid=$(lsblk -n -o PARTUUID -r "$dev" | tr a-z A-Z)
+    local parents=( $(lsblk -s -n -o NAME -r "$dev" | tail -n +2) )
+    if (( ${#parents[@]} != 1 )); then
+        echo "Do not know how to handle $dev with other than one parent: ${parents[*]}" >&2
+        return 1
+    fi
+    local disk=/dev/${parents[0]}
+    local part=$(printf %s "$dev" | grep -o '[0-9]\+$')
+    local checkuuid=$(sgdisk "$disk" -i "$part" | grep -i 'Partition unique GUID' | sed 's/^.*://; s/[[:space:]]\+//g' | tr a-z A-Z)
+    if [[ $devpartuuid != "$checkuuid" ]]; then
+        echo "PARTUUID mismatch: $dev ($devpartuuid) somehow not $disk partition $part ($checkuuid)" >&2
+        return 1
+    fi
+    printf %s "$disk $part"
 }
 
 # Given a device node, output the unique entry from /etc/crypttab covering that

@@ -1,24 +1,47 @@
 #! /bin/sh
 
+# Sets up a temporary working directory in the standard way
 setup_tmp_dir() {
     mktemp -d -t emboot-XXXXXXXXXX
 }
 
+# Basic shell quoting. Makes no attempt to ensure the output is human-readable.
+# See the version in bash_functions for something nicer.
+quote_args() {
+    local space=""
+    local w
+    for w; do
+        printf %s "$space$(printf \'; printf %s "$w" | sed -e "s/'/'\\\\''/g"; printf \')"
+        space=" "
+    done
+}
+
+# Quotes a basic regular expression. Care must be taken with strings with
+# trailing newlines, as they will be stripped by command substitution. See
+# `any_of_bre` for how to avoid this.
 quote_bre() {
     printf %s "$1" | sed -e 's/[]\\^$*.[]/\\\0/g'
 }
 
+# Returns a BRE matching any of the given arguments literally. (I.e., arguments
+# are quoted.)
 any_of_bre() {
     local quoted=""
     local oor=""
     local w
     for w; do
-        quoted=$quoted$oor$(quote_bre "$w")
+        q=$(quote_bre "${w}x")
+        quoted=$quoted$oor${q%x}
         oor='\|'
     done
     printf %s "$quoted"
 }
 
+# Parses YAML in the first argument, producing shell output that can be eval'ed
+# to assign values to variables named for keys. Optional second argument adds a
+# prefix to each key. Adapted from
+# https://stackoverflow.com/questions/5014632/how-can-i-parse-a-yaml-file-from-a-linux-shell-script
+# to support keys with spaces, which are valid YAML.
 parse_yaml() {
    local prefix=$2
    local s='[[:space:]]*' w='[a-zA-Z0-9_ ]*' fs=$(echo @|tr @ '\034')
@@ -38,6 +61,9 @@ parse_yaml() {
           }'
 }
 
+# Returns 0 for anything but "1" or strings starting with [nNfF]. The idea is
+# to support yes/no, true/false, 0/1 in configuration files. There should be a
+# convention for this.
 is_true() {
     case "$(printf %s "$1" | tr A-Z a-z)" in
         y*|t*|1)
@@ -50,6 +76,8 @@ is_true() {
     return 0
 }
 
+# Self-explanatory. From
+# https://github.com/mateusza/shellscripthttpd/blob/master/base64.sh
 b64encode() {
     local wrap=65
     local OPTIND
@@ -138,40 +166,31 @@ b64decode() {
         )"
 }
 
-increment_counter() {
-    tpm2_nvincrement -C o "$COUNTER_HANDLE"
-}
-
-read_counter() {
-    tpm2_nvread -C o "$COUNTER_HANDLE" -s 8
-}
-
-read_pcrs() {
-    tpm2_pcrread -Q sha256:"$SEAL_PCRS" -o "$1"
-}
-
-create_provision_context() {
-    local workdir=${1:-.}
-    tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$workdir"/provision.ctx
-}
-
+# Outputs the path to the given loader filename as mounted on the filesystem
 emboot_loader_unix_path() {
     printf %s\\n "$EFI_MOUNT/EFI/$OS_SHORT_NAME/${1:-emboot.efi}"
 }
 
+# Outputs the UEFI runtime path to the loader (i.e., relative to the EFI system
+# partition root, using backslashes instead of forward slashes)
 emboot_loader_path() {
     printf %s\\n '\EFI\'"$OS_SHORT_NAME"'\'"${1:-emboot.efi}"
 }
 
+# Converts a UEFI runtime path to a UNIX path relative to the filesystem root
 efi_path_to_unix() {
     printf %s "$EFI_MOUNT"
     printf %s%s\\n "$1" | sed -e 's/\\/\//g'
 }
 
+# Outputs the emboot state file on the EFI system partition
 emboot_state_file() {
     printf %s "$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot.state"
 }
 
+# Builds an EFI app from the host OS release file, the given kernel command
+# line, kernel image, and initrd, and the configured EFI stub, and writes it to
+# the given output filename
 create_efi_app() {
     local kernel=$1
     local initrd=$2
@@ -184,30 +203,55 @@ create_efi_app() {
         /usr/lib/systemd/boot/efi/linuxx64.efi.stub "$output"
 }
 
+# Increments the monotonic counter
+increment_counter() {
+    tpm2_nvincrement -C o "$COUNTER_HANDLE"
+}
+
+# Outputs the current value of the monotonic counter
+read_counter() {
+    tpm2_nvread -C o "$COUNTER_HANDLE" -s 8
+}
+
+# Writes the configured PCRs to the argument filename
+read_pcrs() {
+    tpm2_pcrread -Q sha256:"$SEAL_PCRS" -o "$1"
+}
+
+# Writes future PCR predictions to the first arg working directory, passing the
+# remaining arguments to tpm_futurepcr
 predict_future_pcrs() {
     local workdir=${1:-.}
     shift
     tpm_futurepcr -L "$SEAL_PCRS" -H sha256 "$@" -o "$workdir"/pcrs
 }
 
-seal_data() {
+# Seals stdin to the seal metadata in the argument working directory. Output is
+# written to sealed.{priv,pub} in that directory.
+seal_data() {(
     local workdir=${1:-.}
+    # Make sure we don't unintentionally send input to anything but
+    # tpm2_create. This is also the reason for the subshell: so we don't
+    # accidentally clobber the caller's stdin on early exit.
+    exec 3<&0 </dev/null
+    trap 'tpm2_flushcontext -Q -t' EXIT
     rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
-    tpm2_startauthsession -Q -S "$workdir"/session.ctx
-    tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs
-    tpm2_policynv -Q -S "$workdir"/session.ctx -C o -i "$workdir"/counter -L "$workdir"/policy "$COUNTER_HANDLE" ule
-    tpm2_create -Q -C "$workdir"/provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - \
-        -L "$workdir"/policy -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub
-    tpm2_flushcontext -Q "$workdir"/session.ctx
-    rm -f "$workdir"/session.ctx
-}
+    tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$workdir"/provision.ctx && \
+        tpm2_startauthsession -Q -S "$workdir"/session.ctx && \
+        tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
+        tpm2_policynv -Q -S "$workdir"/session.ctx -C o -i "$workdir"/counter -L "$workdir"/policy "$COUNTER_HANDLE" ule && \
+        <&3 3<&- tpm2_create -Q -C "$workdir"/provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - -L "$workdir"/policy -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub
+)}
 
+# Outputs a space-separated list of token IDs associated with emboot
 list_luks_token_ids() {
     local cryptdev=$1
     local krel=$2
     cryptsetup luksDump "$cryptdev" --dump-json-metadata | jq -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'"${krel:+ and .\"value\".\"krel\" == \"$krel\"}"')) | map(.key) | join(" ")'
 }
 
+# Outputs the emboot seal metadata from a given token ID from the given LUKS
+# device to the given working directory
 export_luks_seal_metadata() {
     local workdir=${1:-.}
     local cryptdev=$2
@@ -223,26 +267,21 @@ export_luks_seal_metadata() {
     return 0
 }
 
-unseal_data() {
+# Attempts to unseal the sealed key using the emboot seal metadata from the
+# given working directory and output the plaintext to stdout
+unseal_data() {(
     local workdir=${1:-.}
-    local -; set +e
-
+    trap 'tpm2_flushcontext -Q -t' EXIT
     if [ ! -r "$workdir"/pcrs ]; then
-        read_pcrs "$workdir"/pcrs
+        read_pcrs "$workdir"/pcrs || return 1
     fi
     if [ ! -r "$workdir"/counter ]; then
-        read_counter >"$workdir"/counter
+        read_counter >"$workdir"/counter || return 1
     fi
-    tpm2_load -Q -C "$workdir"/provision.ctx -r "$workdir"/sealed.priv \
-            -u "$workdir"/sealed.pub -c "$workdir"/load.ctx && \
+    tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$workdir"/provision.ctx && \
+        tpm2_load -Q -C "$workdir"/provision.ctx -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub -c "$workdir"/load.ctx && \
         tpm2_startauthsession -Q -S "$workdir"/session.ctx --policy-session && \
         tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
         tpm2_policynv -Q -C o -S "$workdir"/session.ctx -i "$workdir"/counter "$COUNTER_HANDLE" ule && \
         tpm2_unseal -Q -c "$workdir"/load.ctx -p session:"$workdir"/session.ctx
-    local rc=$?
-    if [ -e "$workdir"/session.ctx ]; then
-        tpm2_flushcontext -Q "$workdir"/session.ctx
-    fi
-    rm -f "$workdir"/load.ctx "$workdir"/session.ctx
-    return $rc
-}
+)}

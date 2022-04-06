@@ -22,7 +22,6 @@ trap cleanup EXIT
 tmpdir=$(setup_tmp_dir)
 
 read_counter >"$tmpdir"/counter
-create_provision_context "$tmpdir"
 
 read_efi_vars
 

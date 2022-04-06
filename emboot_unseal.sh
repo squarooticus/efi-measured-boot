@@ -29,7 +29,6 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
     for tid in $(list_luks_token_ids "$CRYPTTAB_SOURCE" "$(uname -r)"); do
         export_luks_seal_metadata "$tmpdir" "$CRYPTTAB_SOURCE" "$tid"
 
-        create_provision_context "$tmpdir"
         if unseal_data "$tmpdir" >&3 3>&-; then
             echo "$(basename "$cmd")${CRYPTTAB_SOURCE:+ of $CRYPTTAB_SOURCE} succeeded${CRYPTTAB_NAME:+ for $CRYPTTAB_NAME} using token ID $tid"
             exit 0
