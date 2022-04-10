@@ -213,9 +213,9 @@ read_counter() {
     tpm2_nvread -C o "$COUNTER_HANDLE" -s 8
 }
 
-# Writes the configured PCRs to the argument filename
+# Writes the configured PCRs, either to the argument filename or to stdout
 read_pcrs() {
-    tpm2_pcrread -Q sha256:"$SEAL_PCRS" -o "$1"
+    tpm2_pcrread ${1:+-Q} sha256:"$SEAL_PCRS"${1:+ -o "$1"}
 }
 
 # Writes future PCR predictions to the first arg working directory, passing the

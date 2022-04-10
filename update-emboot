@@ -2,6 +2,16 @@
 
 cmd=$0
 
+inc_counter=
+while getopts 'i' opt; do
+    case "$opt" in
+        i) inc_counter=1 ;;
+        :) echo "$OPTARG requires an argument" >&2; return 1;;
+        ?) echo "unknown argument" >&2; return 1;;
+    esac
+done
+shift $((OPTIND-1))
+
 [ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
 if [[ $cmd = ./* ]]; then APPDIR=.; fi
 . "${APPDIR:-.}"/functions
@@ -12,4 +22,8 @@ set -e
 "$APPDIR"/emboot_install
 "$APPDIR"/emboot_update_efi_apps
 "$APPDIR"/emboot_update_efi_boot_order
+if [ -n "$inc_counter" ]; then
+    echo "Incrementing monotonic counter" 1>&2
+    increment_counter
+fi
 "$APPDIR"/emboot_seal_key
