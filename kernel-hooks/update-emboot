@@ -1,0 +1,28 @@
+#! /bin/sh
+set -e
+
+cmd=$0
+
+which update-emboot >/dev/null 2>&1 || exit 0
+
+if type systemd-detect-virt >/dev/null 2>&1 &&
+   systemd-detect-virt --quiet --container; then
+	exit 0
+fi
+
+set -- $DEB_MAINT_PARAMS
+mode="${1#\'}"
+mode="${mode%\'}"
+case $cmd:$mode:$DPKG_MAINTSCRIPT_PACKAGE in
+    */postinst.d/*::*|*/postinst.d/*:configure:*)
+        exec update-emboot
+	;;
+    */postrm.d/*::*|*/postrm.d/*:remove:*)
+        exec update-emboot -i
+	;;
+    */post-update.d/*:*:|*/post-update.d/*:*:linux-image-*)
+        exec update-emboot
+        ;;
+esac
+
+exit 0
