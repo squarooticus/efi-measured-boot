@@ -21,13 +21,11 @@ if [[ $cmd = ./* ]]; then APPDIR=.; fi
 
 set -e
 
-if [ -z "$krel" ]; then
-    "$APPDIR"/emboot_install
-    "$APPDIR"/emboot_update_efi_apps
-    "$APPDIR"/emboot_update_efi_boot_order
-    if [ -n "$inc_counter" ]; then
-        echo "Incrementing monotonic counter" 1>&2
-        increment_counter
-    fi
+"$APPDIR"/emboot_install ${krel:+-k "$krel"}
+"$APPDIR"/emboot_update_efi_apps
+"$APPDIR"/emboot_update_efi_boot_order
+if [ -n "$inc_counter" ]; then
+    echo "Incrementing monotonic counter" 1>&2
+    increment_counter
 fi
 "$APPDIR"/emboot_seal_key ${krel:+-k "$krel"}

@@ -21,7 +21,7 @@ case $cmd:$mode:$DPKG_MAINTSCRIPT_PACKAGE in
     */postrm.d/*::*|*/postrm.d/*:remove:*)
         exec update-emboot -i
 	;;
-    */post-update.d/*:*:|*/post-update.d/*:*:linux-image-*)
+    */post-update.d/*:*:|*/post-update.d/*:*:*)
         krel=$arg1
         exec update-emboot ${krel:+-k "$krel"}
         ;;

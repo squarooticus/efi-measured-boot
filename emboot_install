@@ -4,6 +4,16 @@ cmd=$0
 
 exec 3>&1 >&2
 
+tkrel=
+while getopts 'k:' opt; do
+    case "$opt" in
+        k) tkrel=$OPTARG ;;
+        :) echo "$OPTARG requires an argument" >&2; return 1;;
+        ?) echo "unknown argument" >&2; return 1;;
+    esac
+done
+shift $((OPTIND-1))
+
 [ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
 if [[ $cmd = ./* ]]; then APPDIR=.; fi
 . "${APPDIR:-.}"/functions
@@ -38,23 +48,30 @@ kernels=( $(list_installed_kernels) )
 
 statefile=$(emboot_state_file)
 rm -f "$statefile"
+cat >$statefile <<EOF;
+primary=${kernels[0]##*/vmlinuz-}
+old=${kernels[1]##*/vmlinuz-}
+EOF
+
+update_loader() {
+    whichl=$1
+    kpath=$2
+    lname=$3
+
+    krel=${kpath##*/vmlinuz-}
+    if [ -z "$tkrel" -o "$tkrel" = "$krel" ]; then
+        echo "Creating $whichl EFI loader ($krel)"
+        create_efi_app "$kpath" /boot/initrd.img-"$krel" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
+        cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path "$lname")
+    fi
+}
 
 if [ -n "${kernels[0]}" ]; then
-    kfn=$(basename "${kernels[0]}")
-    krel=${kfn#vmlinuz-}
-    echo "Creating primary EFI loader for $krel"
-    create_efi_app "${kernels[0]}" /boot/initrd.img-"$krel" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
-    cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path)
-    echo "primary=$(quote_args "$krel")" >"$statefile"
+    update_loader primary "${kernels[0]}" emboot.efi
 fi
 
 if [ -n "${kernels[1]}" ]; then
-    kfn=$(basename "${kernels[1]}")
-    krel=${kfn#vmlinuz-}
-    echo "Creating old EFI loader for $krel"
-    create_efi_app "${kernels[1]}" /boot/initrd.img-"$krel" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
-    cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path emboot_old.efi)
-    echo "old=$(quote_args "$krel")" >>"$statefile"
+    update_loader old "${kernels[1]}" emboot_old.efi
 fi
 
 exit 0
