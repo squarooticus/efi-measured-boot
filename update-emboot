@@ -3,9 +3,11 @@
 cmd=$0
 
 inc_counter=
-while getopts 'i' opt; do
+krel=
+while getopts 'ik:' opt; do
     case "$opt" in
         i) inc_counter=1 ;;
+        k) krel=$OPTARG ;;
         :) echo "$OPTARG requires an argument" >&2; return 1;;
         ?) echo "unknown argument" >&2; return 1;;
     esac
@@ -19,11 +21,13 @@ if [[ $cmd = ./* ]]; then APPDIR=.; fi
 
 set -e
 
-"$APPDIR"/emboot_install
-"$APPDIR"/emboot_update_efi_apps
-"$APPDIR"/emboot_update_efi_boot_order
-if [ -n "$inc_counter" ]; then
-    echo "Incrementing monotonic counter" 1>&2
-    increment_counter
+if [ -z "$krel" ]; then
+    "$APPDIR"/emboot_install
+    "$APPDIR"/emboot_update_efi_apps
+    "$APPDIR"/emboot_update_efi_boot_order
+    if [ -n "$inc_counter" ]; then
+        echo "Incrementing monotonic counter" 1>&2
+        increment_counter
+    fi
 fi
-"$APPDIR"/emboot_seal_key
+"$APPDIR"/emboot_seal_key ${krel:+-k "$krel"}

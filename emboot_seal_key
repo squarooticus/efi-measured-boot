@@ -4,6 +4,16 @@ cmd=$0
 
 exec 3>&1 >&2
 
+krel=
+while getopts 'k:' opt; do
+    case "$opt" in
+        k) krel=$OPTARG ;;
+        :) echo "$OPTARG requires an argument" >&2; return 1;;
+        ?) echo "unknown argument" >&2; return 1;;
+    esac
+done
+shift $((OPTIND-1))
+
 [ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
 if [[ $cmd = ./* ]]; then APPDIR=.; fi
 . "${APPDIR:-.}"/functions
@@ -28,9 +38,13 @@ read_efi_vars
 rootdev=( $(get_device_info /) )
 cryptdev=( $(get_crypttab_entry "${rootdev[1]}") )
 
-echo "Sealing key to primary EFI loader"
-seal_to_loader "$tmpdir" "${cryptdev[1]}" "$(emboot_loader_unix_path)" "$primary"
-echo "Sealing key to old EFI loader"
-seal_to_loader "$tmpdir" "${cryptdev[1]}" "$(emboot_loader_unix_path emboot_old.efi)" "$old"
+if [ -z "$krel" -o "$krel" = "$primary" ]; then
+    echo "Sealing key to primary EFI loader ($primary)"
+    seal_to_loader "$tmpdir" "${cryptdev[1]}" "$(emboot_loader_unix_path)" "$primary"
+fi
+if [ -z "$krel" -o "$krel" = "$old" ]; then
+    echo "Sealing key to old EFI loader ($old)"
+    seal_to_loader "$tmpdir" "${cryptdev[1]}" "$(emboot_loader_unix_path emboot_old.efi)" "$old"
+fi
 
 exit 0
