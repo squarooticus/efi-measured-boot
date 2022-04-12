@@ -188,6 +188,24 @@ emboot_state_file() {
     printf %s "$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot.state"
 }
 
+# Outputs the kernel release for each given input kernel path. Requires that
+# the kernel filenames match vmlinuz-<release>, and fails otherwise.
+kernel_path_to_release() {
+    space=
+    for kpath; do
+        kfn=${kpath##*/}
+        case "$kfn" in
+            vmlinuz-*)
+                printf %s "$space${kfn##vmlinuz-}"
+                space=' '
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    done
+}
+
 # Builds an EFI app from the host OS release file, the given kernel command
 # line, kernel image, and initrd, and the configured EFI stub, and writes it to
 # the given output filename

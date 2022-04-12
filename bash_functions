@@ -104,7 +104,7 @@ compare_versions() {
 
 # Sorts the given array according to the given comparison function. The
 # comparison function must satisfy the return value scheme from
-# compare_versions above.
+# compare_versions above, with return value 4 indicating comparison error.
 qsort() {
     local aname=$1
     declare -n aref=$aname
@@ -130,15 +130,17 @@ qsort() {
             $compare "${aref[$i]}" "$pivot"
             cmpi=$?
         done
+        if (( cmpi == 4 )); then return 4; fi
 
         (( j-- ))
         $compare "${aref[$j]}" "$pivot"
         cmpj=$?
-        while (( cmpj > 2 )); do
+        while (( cmpj > 2 && cmpj != 4 )); do
             (( j-- ))
             $compare "${aref[$j]}" "$pivot"
             cmpj=$?
         done
+        if (( cmpi == 4 )); then return 4; fi
 
         if (( i >= j )); then
             break
@@ -251,24 +253,30 @@ get_device_info() {(
 
 # Output a space-separated list of kernel images in /boot in reverse order
 # (highest first).
-list_installed_kernels() {
+list_installed_kernels() {(
     declare -a kvers
     shopt -s nullglob
     local kvers=( /boot/vmlinuz* )
 
+    set +e
+
     kver_descending() {
-        local vers=( "${@%%-[^0-9.-]*}" )
-        vers=( "${vers[@]##*/vmlinuz-}" )
-        compare_versions "${@%%-[^0-9.-]*}"
+        local vers=( $(kernel_path_to_release "$@") )
+        # Strip the trailing -<arch> because by semver rules it would cause the
+        # numeric Debian revision to be compared as a string.
+        vers=( "${vers[@]%%-[^/0-9.-]*}" )
+        if (( ${#vers[@]} != 2 )); then return 4; fi
+        compare_versions "${vers[@]}"
         local rc=$?
         return $(( 4-rc ))
     }
 
     qsort kvers kver_descending
+    if (( $? == 4 )); then return 1; fi
 
     local IFS=" "
     printf %s "${kvers[*]}"
-}
+)}
 
 # Populates:
 #  * An associative array `efi_apps` mapping uppercase loader path to a
