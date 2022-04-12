@@ -48,7 +48,7 @@ kernels=( $(list_installed_kernels) )
 
 statefile=$(emboot_state_file)
 rm -f "$statefile"
-cat >$statefile <<EOF;
+cat >$statefile <<EOF
 primary=$(quote_args "$(kernel_path_to_release "${kernels[0]}")")
 old=$(quote_args "$(kernel_path_to_release "${kernels[1]}")")
 EOF
