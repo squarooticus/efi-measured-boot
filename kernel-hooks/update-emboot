@@ -4,7 +4,11 @@ set -e
 cmd=$0
 arg1=$1
 
-which update-emboot >/dev/null 2>&1 || exit 0
+if ! which update-emboot >/dev/null 2>&1; then
+    PATH=$PATH:/usr/local/bin:/usr/local/sbin
+    export PATH
+    which update-emboot >/dev/null 2>&1 || exit 0
+fi
 
 if type systemd-detect-virt >/dev/null 2>&1 &&
    systemd-detect-virt --quiet --container; then
