@@ -354,6 +354,10 @@ import_luks_seal_metadata() {
         json+=", \"$k\": \$${k//./_}"
     done
     local keyslot=$(get_emboot_key_slot "$cryptdev")
+    [ -n "$keyslot" ] || {
+        echo "No key slots on $cryptdev matching $LUKS_KEY" >&2
+        return 1
+    }
     jq --null-input "${args[@]}" --arg krel "$krel" --arg keyslot "$keyslot" --arg updated "$(date +%s)" '{ "type": "emboot", "keyslots": [ $keyslot ], "krel": $krel, "updated": $updated'"$json"' }' >"$workdir"/token.json
     local current_token_ids=( $(list_luks_token_ids "$cryptdev" "$krel") )
     for k in "${current_token_ids[@]}"; do

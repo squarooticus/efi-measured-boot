@@ -24,9 +24,6 @@ revert_changes() {
 
 trap 'rc=$?; [ "$rc" -eq 0 ] && exit 0; revert_changes' EXIT
 
-# Update initrd according to newly-installed hook
-update-initramfs -u -k all
-
 # Create a new key and add it to the LUKS header of the root partition
 mkdir -m 0700 -p $(dirname "$LUKS_KEY")
 if [ -e "$LUKS_KEY" ]; then
@@ -39,6 +36,9 @@ if ! cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" "${cryptdev[1]}" </dev
     echo "You may be prompted to enter an existing LUKS passphrase for your root partition" >&2
     cryptsetup luksAddKey "${cryptdev[1]}" "$LUKS_KEY"
 fi
+
+# Update initrd according to newly-installed hook
+update-initramfs -u -k all
 
 echo "Installing EFI blobs" >&2
 ./emboot_install

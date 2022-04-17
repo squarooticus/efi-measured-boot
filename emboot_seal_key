@@ -24,7 +24,11 @@ set -e
 . "$(emboot_state_file)"
 
 cleanup() {
+    rc=$?
     [ -n "$tmpdir" ] && rm -rf "$tmpdir"
+    [ "$rc" -eq 0 ] && exit 0
+    echo "$(basename "$cmd") failed with exit code $rc" >&2
+    exit $rc
 }
 
 trap cleanup EXIT

@@ -27,7 +27,13 @@ case $cmd:$mode:$DPKG_MAINTSCRIPT_PACKAGE in
 	;;
     */post-update.d/*:*:|*/post-update.d/*:*:*)
         krel=$arg1
-        exec update-emboot ${krel:+-k "$krel"}
+        set +e
+        update-emboot ${krel:+-k "$krel"}
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            echo "update-emboot failed with exit code $rc" >&2
+            echo "WARNING: system may be unbootable!" >&2
+        fi
         ;;
 esac
 
