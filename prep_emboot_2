@@ -38,7 +38,7 @@ if ! cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" "${cryptdev[1]}" </dev
 fi
 
 # Update initrd according to newly-installed hook
-update-initramfs -u -k all
+UPDATE_EMBOOT_NO_SEAL=1 update-initramfs -u -k all
 
 echo "Installing EFI blobs" >&2
 ./emboot_install

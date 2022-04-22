@@ -4,10 +4,12 @@ cmd=$0
 
 inc_counter=
 krel=
-while getopts 'ik:' opt; do
+no_seal=
+while getopts 'ik:S' opt; do
     case "$opt" in
         i) inc_counter=1 ;;
         k) krel=$OPTARG ;;
+        S) no_seal=1 ;;
         :) echo "$OPTARG requires an argument" >&2; return 1;;
         ?) echo "unknown argument" >&2; return 1;;
     esac
@@ -28,4 +30,4 @@ if [ -n "$inc_counter" ]; then
     echo "Incrementing monotonic counter" 1>&2
     increment_counter
 fi
-"$APPDIR"/emboot_seal_key ${krel:+-k "$krel"}
+[ -n "$no_seal" ] || "$APPDIR"/emboot_seal_key ${krel:+-k "$krel"}
