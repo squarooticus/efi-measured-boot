@@ -270,7 +270,7 @@ list_luks_token_ids() {
 
 # Outputs the emboot seal metadata from a given token ID from the given LUKS
 # device to the given working directory
-export_luks_seal_metadata() {
+export_luks_token() {
     local workdir=${1:-.}
     local cryptdev=$2
     local token_id=$3

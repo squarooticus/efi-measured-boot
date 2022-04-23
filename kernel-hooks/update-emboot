@@ -20,10 +20,11 @@ mode="${1#\'}"
 mode="${mode%\'}"
 case $cmd:$mode:$DPKG_MAINTSCRIPT_PACKAGE in
     */postinst.d/*::*|*/postinst.d/*:configure:*)
-        exec update-emboot
+        exec update-emboot ${krel:+-k "$krel"}
 	;;
     */postrm.d/*::*|*/postrm.d/*:remove:*)
-        exec update-emboot -i
+        krel=$arg1
+        exec update-emboot -i ${krel:+-r -k "$krel"}
 	;;
     */post-update.d/*:*:|*/post-update.d/*:*:*)
         krel=$arg1

@@ -315,8 +315,8 @@ create_emboot_efi_entry() {
 }
 
 # Outputs the index of the emboot key slot. If there is an existing emboot
-# token, pulls this directly from the emboot metadata; if not, tests the key
-# against all keyslots until it finds a match.
+# token, pulls this directly from it; if not, tests the key against all
+# keyslots until it finds a match.
 get_emboot_key_slot() {
     local cryptdev=$1
     local emboot_token_ids=( $(list_luks_token_ids "$cryptdev") )
@@ -339,9 +339,9 @@ get_emboot_key_slot() {
     return 1
 }
 
-# Composes emboot seal metadata from the working directory and imports it as a
-# new LUKS token.
-import_luks_seal_metadata() {
+# Composes JSON for sealed key data in the working directory and imports it as
+# a new LUKS token.
+import_luks_token() {
     local workdir=${1:-.}
     local cryptdev=$2
     local krel=$3
@@ -364,6 +364,16 @@ import_luks_seal_metadata() {
         cryptsetup token remove "$cryptdev" --token-id "$k"
     done
     cryptsetup token import "$cryptdev" --json-file "$workdir"/token.json
+}
+
+# Removes LUKS tokens for a given kernel release.
+remove_luks_token() {
+    local cryptdev=$1
+    local krel=$2
+    local krel_token_ids=( $(list_luks_token_ids "$cryptdev" "$krel") )
+    for k in "${krel_token_ids[@]}"; do
+        cryptsetup token remove "$cryptdev" --token-id "$k"
+    done
 }
 
 # Given a working directory (or $PWD if empty), a path to a loader, and a
@@ -396,5 +406,5 @@ seal_to_loader() {
 
     predict_future_pcrs "$workdir" --substitute-bsa-unix-path "$(efi_path_to_unix "$current_loader")=$loader"
     seal_data "$workdir" <$LUKS_KEY
-    import_luks_seal_metadata "$workdir" "$cryptdev" "$krel"
+    import_luks_token "$workdir" "$cryptdev" "$krel"
 }

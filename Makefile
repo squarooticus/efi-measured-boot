@@ -19,4 +19,4 @@ step2: checks
 step3: checks
 	@./emboot_seal_key
 	@./emboot_update_efi_boot_order
-	@echo "Installation complete: run update-emboot whenever kernel or initrd are updated" >&2
+	@echo "Installation complete: update-emboot will be run automatically whenever kernels are installed or removed or when initrds are updated" >&2

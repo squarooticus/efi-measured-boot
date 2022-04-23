@@ -4,12 +4,14 @@ cmd=$0
 
 exec 3>&1 >&2
 
-tkrel=
-while getopts 'k:' opt; do
+krel=
+remove=
+while getopts 'k:r' opt; do
     case "$opt" in
-        k) tkrel=$OPTARG ;;
-        :) echo "$OPTARG requires an argument" >&2; return 1;;
-        ?) echo "unknown argument" >&2; return 1;;
+        k) krel=$OPTARG ;;
+        r) remove=1 ;;
+        :) echo "$OPTARG requires an argument"; exit 1;;
+        ?) echo "unknown argument"; exit 1;;
     esac
 done
 shift $((OPTIND-1))
@@ -20,6 +22,8 @@ if [[ $cmd = ./* ]]; then APPDIR=.; fi
 . "${APPDIR:-.}"/bash_functions
 
 set -e
+
+[ -z "$remove" -o -n "$krel" ] || { echo "-r requires -k to be specified"; exit 1; }
 
 tmpdir=$(setup_tmp_dir)
 
@@ -58,11 +62,16 @@ update_loader() {
     kpath=$2
     lname=$3
 
-    krel=$(kernel_path_to_release "$kpath")
-    if [ -z "$tkrel" -o "$tkrel" = "$krel" ]; then
-        echo "Creating $whichl EFI loader ($krel)"
-        create_efi_app "$kpath" /boot/initrd.img-"$krel" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
-        cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path "$lname")
+    upd_krel=$(kernel_path_to_release "$kpath")
+    if [ -z "$krel" -o "$krel" = "$upd_krel" ]; then
+        if [ -n "$remove" ]; then
+            echo "Removing $whichl EFI loader ($upd_krel)"
+            rm -f "$(emboot_loader_unix_path "$lname")"
+        else
+            echo "Creating $whichl EFI loader ($upd_krel)"
+            create_efi_app "$kpath" /boot/initrd.img-"$upd_krel" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
+            cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path "$lname")
+        fi
     fi
 }
 
