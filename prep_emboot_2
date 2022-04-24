@@ -37,14 +37,9 @@ if ! cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" "${cryptdev[1]}" </dev
     cryptsetup luksAddKey "${cryptdev[1]}" "$LUKS_KEY"
 fi
 
-# Update initrd according to newly-installed hook
-UPDATE_EMBOOT_NO_SEAL=1 update-initramfs -u -k all
-
-echo "Installing EFI blobs" >&2
-./emboot_install
-
-echo "Adding EFI boot entries" >&2
-./emboot_update_efi_apps
+# Update initrd according to newly-installed hook. This also adds EFI boot
+# entries and potentially updates the boot order, if configured to do so.
+EMBOOT_KERNEL_HOOK_NO_SEAL=1 update-initramfs -u -k all
 
 echo "Setting next EFI boot to latest emboot kernel blob" >&2
 read_efi_vars

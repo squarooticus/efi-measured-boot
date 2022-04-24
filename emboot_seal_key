@@ -4,26 +4,12 @@ cmd=$0
 
 exec 3>&1 >&2
 
-krel=
-remove=
-while getopts 'k:r' opt; do
-    case "$opt" in
-        k) krel=$OPTARG ;;
-        r) remove=1 ;;
-        :) echo "$OPTARG requires an argument"; exit 1;;
-        ?) echo "unknown argument"; exit 1;;
-    esac
-done
-shift $((OPTIND-1))
-
 [ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
 if [[ $cmd = ./* ]]; then APPDIR=.; fi
 . "${APPDIR:-.}"/functions
 . "${APPDIR:-.}"/bash_functions
 
 set -e
-
-[ -z "$remove" -o -n "$krel" ] || { echo "-r requires -k to be specified"; exit 1; }
 
 . "$(emboot_state_file)"
 
@@ -46,15 +32,17 @@ read_efi_vars
 rootdev=( $(get_device_info /) )
 cryptdev=( $(get_crypttab_entry "${rootdev[1]}") )
 
-if [ -n "$remove" ]; then
-    echo "Removing tokens for $krel (if any)"
-    remove_luks_token "${cryptdev[1]}" "$krel"
-else
-    if [ -z "$krel" -o "$krel" = "$primary" ]; then
+if [ -n "$primary" ]; then
+    token_ids=( $(list_luks_token_ids "${cryptdev[1]}" "$primary") )
+    if [ ${#token_ids} -eq 0 ]; then
         echo "Sealing key to primary EFI loader ($primary)"
         seal_to_loader "$tmpdir" "${cryptdev[1]}" "$(emboot_loader_unix_path)" "$primary"
     fi
-    if [ -z "$krel" -o "$krel" = "$old" ]; then
+fi
+
+if [ -n "$old" ]; then
+    token_ids=( $(list_luks_token_ids "${cryptdev[1]}" "$old") )
+    if [ ${#token_ids} -eq 0 ]; then
         echo "Sealing key to old EFI loader ($old)"
         seal_to_loader "$tmpdir" "${cryptdev[1]}" "$(emboot_loader_unix_path emboot_old.efi)" "$old"
     fi

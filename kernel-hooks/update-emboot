@@ -24,12 +24,12 @@ case $cmd:$mode:$DPKG_MAINTSCRIPT_PACKAGE in
 	;;
     */postrm.d/*::*|*/postrm.d/*:remove:*)
         krel=$arg1
-        exec update-emboot -i ${krel:+-r -k "$krel"}
+        exec update-emboot -i ${krel:+-k "$krel"}
 	;;
     */post-update.d/*:*:|*/post-update.d/*:*:*)
         krel=$arg1
         set +e
-        update-emboot ${krel:+-k "$krel"} ${UPDATE_EMBOOT_NO_SEAL:+-S}
+        update-emboot ${krel:+-k "$krel"} ${EMBOOT_KERNEL_HOOK_NO_SEAL:+-S}
         rc=$?
         if [ "$rc" -ne 0 ]; then
             echo "update-emboot failed with exit code $rc" >&2

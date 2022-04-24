@@ -5,11 +5,9 @@ cmd=$0
 exec 3>&1 >&2
 
 krel=
-remove=
-while getopts 'k:r' opt; do
+while getopts 'k:' opt; do
     case "$opt" in
         k) krel=$OPTARG ;;
-        r) remove=1 ;;
         :) echo "$OPTARG requires an argument"; exit 1;;
         ?) echo "unknown argument"; exit 1;;
     esac
@@ -22,8 +20,6 @@ if [[ $cmd = ./* ]]; then APPDIR=.; fi
 . "${APPDIR:-.}"/bash_functions
 
 set -e
-
-[ -z "$remove" -o -n "$krel" ] || { echo "-r requires -k to be specified"; exit 1; }
 
 tmpdir=$(setup_tmp_dir)
 
@@ -51,36 +47,42 @@ echo "root=UUID=${rootdev[0]} cryptdevice=${cryptdev[1]}:${cryptdev[0]} $KERNEL_
 kernels=( $(list_installed_kernels) )
 
 statefile=$(emboot_state_file)
+
+. "$statefile"
+
+set +e
+
+next_primary=$(kernel_path_to_release "${kernels[0]}")
+next_old=$(kernel_path_to_release "${kernels[1]}")
+
+if [ -n "$next_primary" ]; then
+    if [ -z "$krel" -o "$next_primary" != "$primary" -o "$next_primary" = "$krel" ]; then
+        echo "Creating primary EFI loader ($next_primary)"
+        create_efi_app "${kernels[0]}" /boot/initrd.img-"$next_primary" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
+        cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path emboot.efi)
+        remove_luks_token "${cryptdev[1]}" "$next_primary"
+    fi
+else
+    echo "No primary kernel configured"
+    echo "WARNING: primary emboot EFI entry may be unbootable!"
+    rm -f "$(emboot_loader_unix_path emboot.efi)"
+fi
+
+if [ -n "$next_old" ]; then
+    if [ -z "$krel" -o "$next_old" != "$old" -o "$next_old" = "$krel" ]; then
+        echo "Creating old EFI loader ($next_old)"
+        create_efi_app "${kernels[1]}" /boot/initrd.img-"$next_old" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
+        cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path emboot_old.efi)
+        remove_luks_token "${cryptdev[1]}" "$next_old"
+    fi
+else
+    rm -f "$(emboot_loader_unix_path emboot_old.efi)"
+fi
+
 rm -f "$statefile"
 cat >$statefile <<EOF
-primary=$(quote_args "$(kernel_path_to_release "${kernels[0]}")")
-old=$(quote_args "$(kernel_path_to_release "${kernels[1]}")")
+primary=$(quote_args "$next_primary")
+old=$(quote_args "$next_old")
 EOF
-
-update_loader() {
-    whichl=$1
-    kpath=$2
-    lname=$3
-
-    upd_krel=$(kernel_path_to_release "$kpath")
-    if [ -z "$krel" -o "$krel" = "$upd_krel" ]; then
-        if [ -n "$remove" ]; then
-            echo "Removing $whichl EFI loader ($upd_krel)"
-            rm -f "$(emboot_loader_unix_path "$lname")"
-        else
-            echo "Creating $whichl EFI loader ($upd_krel)"
-            create_efi_app "$kpath" /boot/initrd.img-"$upd_krel" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
-            cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path "$lname")
-        fi
-    fi
-}
-
-if [ -n "${kernels[0]}" ]; then
-    update_loader primary "${kernels[0]}" emboot.efi
-fi
-
-if [ -n "${kernels[1]}" ]; then
-    update_loader old "${kernels[1]}" emboot_old.efi
-fi
 
 exit 0
