@@ -24,7 +24,7 @@ case $cmd:$mode:$DPKG_MAINTSCRIPT_PACKAGE in
 	;;
     */postrm.d/*::*|*/postrm.d/*:remove:*)
         krel=$arg1
-        exec update-emboot -i ${krel:+-k "$krel"}
+        exec update-emboot -i ${krel:+-r -k "$krel"}
 	;;
     */post-update.d/*:*:|*/post-update.d/*:*:*)
         krel=$arg1

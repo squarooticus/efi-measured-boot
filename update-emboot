@@ -4,17 +4,21 @@ cmd=$0
 
 inc_counter=
 krel=
+remove=
 no_seal=
 while getopts 'ik:rS' opt; do
     case "$opt" in
         i) inc_counter=1 ;;
         k) krel=$OPTARG ;;
+        r) remove=1 ;;
         S) no_seal=1 ;;
         :) echo "$OPTARG requires an argument" >&2; exit 1;;
         ?) echo "unknown argument" >&2; exit 1;;
     esac
 done
 shift $((OPTIND-1))
+
+[ -z "$remove" -o -n "$krel" ] || { echo "-r requires -k to be specified"; exit 1; }
 
 [ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
 if [[ $cmd = ./* ]]; then APPDIR=.; fi
@@ -23,11 +27,19 @@ if [[ $cmd = ./* ]]; then APPDIR=.; fi
 
 set -e
 
+if [ -n "$remove" ]; then
+    rootdev=( $(get_device_info /) )
+    cryptdev=( $(get_crypttab_entry "${rootdev[1]}") )
+    remove_luks_token "${cryptdev[1]}" "$krel"
+fi
+
 "$APPDIR"/emboot_install ${krel:+-k "$krel"}
 "$APPDIR"/emboot_update_efi_apps
 "$APPDIR"/emboot_update_efi_boot_order
+
 if [ -n "$inc_counter" ]; then
     echo "Incrementing monotonic counter" 1>&2
     increment_counter
 fi
+
 [ -n "$no_seal" ] || "$APPDIR"/emboot_seal_key
