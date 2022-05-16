@@ -34,7 +34,7 @@ else
 fi
 if ! cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" "${cryptdev[1]}" </dev/null >/dev/null 2>&1; then
     echo "You may be prompted to enter an existing LUKS passphrase for your root partition" >&2
-    cryptsetup luksAddKey "${cryptdev[1]}" "$LUKS_KEY"
+    cryptsetup luksAddKey --pbkdf pbkdf2 --pbkdf-force-iterations 1000 "${cryptdev[1]}" "$LUKS_KEY"
 fi
 
 # Update initrd according to newly-installed hook. This also adds EFI boot
