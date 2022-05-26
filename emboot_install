@@ -48,7 +48,7 @@ kernels=( $(list_installed_kernels) )
 
 statefile=$(emboot_state_file)
 
-. "$statefile"
+[ ! -r "$statefile" ] || . "$statefile"
 
 set +e
 
