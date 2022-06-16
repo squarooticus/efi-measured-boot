@@ -1,3 +1,5 @@
 [submodule "tpm_futurepcr"]
 	path = tpm_futurepcr
 	url = https://github.com/grawity/tpm_futurepcr.git
+	branch = master
+	update = merge
