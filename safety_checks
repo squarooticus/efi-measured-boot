@@ -56,7 +56,7 @@ check_root_luks() {
 
 check_systemd_stub() {
     if ! test -r "$SYSTEMD_STUB"; then
-        echo "systemd EFI stub $SYSTEMD_STUB not available" >&2
+        echo "systemd EFI stub $SYSTEMD_STUB not available: install systemd-boot-efi" >&2
         return 1
     fi
 }
