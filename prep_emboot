@@ -100,6 +100,8 @@ LUKS_KEY=/etc/keys/root-emboot.key
 KERNEL_PARAMS="ro add_efi_memmap"
 UPDATE_BOOT_ORDER=y
 APPDIR=$(quote_args "$APPDIR")
+#VERBOSE=<non-zero for verbose output>
+#UNSEAL_PAUSE=<seconds to sleep after unseal>
 EOF
 
 # Modify crypttab

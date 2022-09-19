@@ -15,7 +15,7 @@ fallback() {
     exec "$keyscript" "$keyscriptarg" >&3 3>&-
 }
 
-trap 'rc=$?; [ "$rc" -eq 0 ] && exit 0; fallback' EXIT
+trap 'rc=$?; [ -z "$UNSEAL_PAUSE" ] || sleep "$UNSEAL_PAUSE"; [ "$rc" -eq 0 ] && exit 0; fallback' EXIT
 
 set -e
 
@@ -23,6 +23,10 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
     . /etc/efi-measured-boot/config
     if [ -z "${cmd##./*}" ]; then APPDIR=.; fi
     . "${APPDIR:-.}"/functions
+
+    if [ "${VERBOSE:-0}" != 0 ]; then
+        tpm2_pcrread sha256:${SEAL_PCRS}
+    fi
 
     tmpdir=$(setup_tmp_dir)
 

@@ -15,7 +15,7 @@ if type systemd-detect-virt >/dev/null 2>&1 &&
 	exit 0
 fi
 
-set -- $DEB_MAINT_PARAMS
+eval set -- $DEB_MAINT_PARAMS
 mode="${1#\'}"
 mode="${mode%\'}"
 case $cmd:$mode:$DPKG_MAINTSCRIPT_PACKAGE in
@@ -24,7 +24,23 @@ case $cmd:$mode:$DPKG_MAINTSCRIPT_PACKAGE in
 	;;
     */postrm.d/*::*|*/postrm.d/*:remove:*)
         krel=$arg1
-        exec update-emboot -i ${krel:+-r -k "$krel"}
+        if [ -n "$krel" ]; then
+            set +e
+            update-emboot ${krel:+-r -k "$krel"}
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+                echo "update-emboot failed with exit code $rc" >&2
+                echo "WARNING: token removal failed for $krel" >&2
+            fi
+            update-emboot -i
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+                echo "update-emboot failed with exit code $rc" >&2
+                echo "WARNING: monotonic counter may have failed to increment" >&2
+            fi
+        else
+            echo "WARNING: kernel release not specified for removal operation" >&2
+        fi
 	;;
     */post-update.d/*:*:|*/post-update.d/*:*:*)
         krel=$arg1
