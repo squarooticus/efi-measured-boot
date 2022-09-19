@@ -6,26 +6,28 @@ inc_counter=
 krel=
 remove=
 no_seal=
-while getopts 'ik:rsSh' opt; do
+while getopts 'ik:rsSnh' opt; do
     case "$opt" in
         i) inc_counter=1 ;;
         k) krel=$OPTARG ;;
         r) remove=1 ;;
         s) seal_only=1 ;;
         S) no_seal=1 ;;
+        n) no_act=1 ;;
         h)
             cat >&2 <<EOF
 syntax: $(basename $0) <options>
 
-operations: (default is to update loader(s) and seal)
+operations: (default is to update loaders and seal)
   -r                   Remove token for given kernel release (requires -k)
-  -s                   Do not update loader(s): seal/create token(s) only
-  -S                   Do not seal/create token(s): update loader(s) only
+  -s                   Do not update loaders: (re)seal/create tokens only
+  -S                   Do not seal/create tokens: update loaders only
   -h                   Help
 
 parameters:
   -i                   Increment monotonic counter before sealing
   -k <kernel release>  Apply operation to given kernel release only
+  -n                   No act: print command lines
 EOF
             exit 0
             ;;
@@ -40,6 +42,15 @@ if [[ $cmd = ./* ]]; then APPDIR=.; fi
 . "${APPDIR:-.}"/functions
 . "${APPDIR:-.}"/bash_functions
 
+do_or_show() {
+    if [ -n "$no_act" ]; then
+        quote_args "$@" >&2
+        printf "\n" >&2
+    else
+        "$@"
+    fi
+}
+
 set -e
 
 if [ -n "$remove" ]; then
@@ -47,7 +58,7 @@ if [ -n "$remove" ]; then
 
     rootdev=( $(get_device_info /) )
     cryptdev=( $(get_crypttab_entry "${rootdev[1]}") )
-    remove_luks_token "${cryptdev[1]}" "$krel"
+    do_or_show remove_luks_token "${cryptdev[1]}" "$krel"
     exit 0
 else
     [ -z "$seal_only" -o -z "$no_seal" ] || { echo "conflicting operations -s and -S"; exit 1; }
@@ -55,17 +66,22 @@ else
     [ -z "$inc_counter" -o -z "$krel" ] || { echo "cannot increment counter and specify kernel release"; exit 1; }
 
     if [ -z "$seal_only" ]; then
-        "$APPDIR"/emboot_install ${krel:+-k "$krel"}
-        "$APPDIR"/emboot_update_efi_apps
-        "$APPDIR"/emboot_update_efi_boot_order
+        do_or_show "$APPDIR"/emboot_install ${krel:+-k "$krel"}
+        do_or_show "$APPDIR"/emboot_update_efi_apps
+        do_or_show "$APPDIR"/emboot_update_efi_boot_order
     fi
 
     if [ -z "$no_seal" ]; then
         if [ -n "$inc_counter" ]; then
-            echo "Incrementing monotonic counter" 1>&2
-            increment_counter
+            do_or_show increment_counter
         fi
 
-        "$APPDIR"/emboot_seal_key ${krel:+-k "$krel"}
+        if [ -n "$krel" ]; then
+            do_or_show "$APPDIR"/emboot_seal_key -k "$krel"
+        elif [ -n "$seal_only" ]; then
+            do_or_show "$APPDIR"/emboot_seal_key -a
+        else
+            do_or_show "$APPDIR"/emboot_seal_key
+        fi
     fi
 fi
