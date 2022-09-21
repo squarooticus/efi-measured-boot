@@ -14,7 +14,7 @@ esac
 
 . /usr/share/initramfs-tools/hook-functions
 
-for i in createprimary flushcontext load pcrread policynv policypcr startauthsession unseal; do
+for i in createprimary flushcontext load nvread pcrread policynv policypcr startauthsession unseal; do
     copy_exec /usr/bin/tpm2_$i /usr/bin
 done
 copy_exec /usr/lib/x86_64-linux-gnu/libtss2-tcti-device.so.0 /usr/lib/x86_64-linux-gnu
