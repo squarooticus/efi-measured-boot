@@ -38,18 +38,20 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
     tmpdir=$(setup_tmp_dir)
 
     verbose_do eval 'read_pcrs >$tmpdir/current_pcrs.txt'
+    verbose_do eval 'read_counter >$tmpdir/current_counter'
 
     krel=$(uname -r)
     for tid in $(list_luks_token_ids "$CRYPTTAB_SOURCE" "$krel"); do
         export_luks_token "$tmpdir" "$CRYPTTAB_SOURCE" "$tid"
-
-        verbose_do diff_pcrs $tmpdir/pcrs $tmpdir/current_pcrs.txt
 
         if unseal_data "$tmpdir" >&3 3>&-; then
             outcome succeeded
             exit 0
         fi
         outcome FAILED
+
+        verbose_do eval 'printf "  counter: current=%d expects>=%d\n" 0x$(xxd -p -c9999 <$tmpdir/current_counter)  0x$(xxd -p -c9999 <$tmpdir/counter)'
+        verbose_do eval 'diff_pcrs $tmpdir/pcrs $tmpdir/current_pcrs.txt | sed -e "s/^/  /"'
     done
 
     rm -rf "$tmpdir"
