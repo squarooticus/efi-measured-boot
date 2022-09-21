@@ -22,7 +22,7 @@ set -e
 
 outcome() {
     echo "EFI measured boot unseal $1"
-    if [ "$1" != succeeded -o "${VERBOSE:-0}" != 0 ]; then
+    if [ "$1" != succeeded ] || is_verbose; then
         [ -z "${CRYPTTAB_SOURCE}" ] || echo "  backing device: ${CRYPTTAB_SOURCE}"
         [ -z "${CRYPTTAB_NAME}" ] || echo "  mapped name: ${CRYPTTAB_NAME}"
         echo "  token ID: $tid"
@@ -37,17 +37,13 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
 
     tmpdir=$(setup_tmp_dir)
 
-    if [ "${VERBOSE:-0}" != 0 ]; then
-        read_pcrs >$tmpdir/current_pcrs.txt
-    fi
+    verbose_do eval 'read_pcrs >$tmpdir/current_pcrs.txt'
 
     krel=$(uname -r)
     for tid in $(list_luks_token_ids "$CRYPTTAB_SOURCE" "$krel"); do
         export_luks_token "$tmpdir" "$CRYPTTAB_SOURCE" "$tid"
 
-        if [ "${VERBOSE:-0}" != 0 ]; then
-            diff_pcrs $tmpdir/pcrs $tmpdir/current_pcrs.txt
-        fi
+        verbose_do diff_pcrs $tmpdir/pcrs $tmpdir/current_pcrs.txt
 
         if unseal_data "$tmpdir" >&3 3>&-; then
             outcome succeeded

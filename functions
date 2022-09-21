@@ -76,6 +76,38 @@ is_true() {
     return 0
 }
 
+# Cleaner looking than putting `|| true` at the end of a command: keeps shell
+# variables, temporarily disables errexit, and works on compound commands (with
+# eval).
+ignore_err() {
+    local do_nothing=$({ "$@"; } >&3 3>&-) 3>&1
+    return 0
+}
+
+# Returns 0 if $VERBOSE >= the given argument (or >= 1 if unspecified)
+is_verbose() {
+    [ -z "$VERBOSE" ] || [ "$VERBOSE" -ge "${1:-1}" ]
+}
+
+# Runs the given command, ignoring errors, if `is_verbose [<value for -l>]`.
+# Note that arguments will be expanded before even getting here, so use eval
+# with a (single-quoted) string to avoid doing unnecessary work.
+verbose_do() {
+    local OPTIND
+    local OPTARG
+    local level=1
+    while getopts 'l:' opt; do
+        case "$opt" in
+            l) level=$OPTARG ;;
+            ?) return 1;;
+        esac
+    done
+    shift $((OPTIND-1))
+    if is_verbose $level; then
+        ignore_err "$@"
+    fi
+}
+
 # Self-explanatory. From
 # https://github.com/mateusza/shellscripthttpd/blob/master/base64.sh
 b64encode() {
