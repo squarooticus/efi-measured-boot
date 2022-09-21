@@ -244,6 +244,38 @@ predict_future_pcrs() {
     tpm_futurepcr -L "$SEAL_PCRS" -H sha256 "$@" -o "$workdir"/pcrs
 }
 
+# Splits a string into multiple newline-separated strings of at most the given
+# length
+split_by_length() {
+    local arg=$1
+    local len=$2
+    while [ -n "$arg" ]; do
+        local entry=$(printf "%s" "$arg" | head -c $len)
+        printf "%s\n" "$entry"
+        arg=${arg#$entry}
+    done
+}
+
+# Complexity required only because tpm2-tools provides no way of formatting
+# binary PCR output as YAML
+diff_pcrs() {
+    local expected_fn=$1
+    local expected_txt_fn=$(dirname $1)/expected_pcrs.txt
+    local current_txt_fn=$2
+    local expected_hex=$(xxd -p -c9999 <$expected_fn | tr a-f A-F)
+    eval set -- $(split_by_length "$expected_hex" 64)
+    local re=''
+    {
+        local IFS=,
+        for pcr in $SEAL_PCRS; do
+            re="$re"'s/^\(\s*'"$pcr"'\s*:\s*0x\).*/\1'"$(quote_bre "$1")"'/i; '
+            shift
+        done
+    }
+    sed -e "$re" <$current_txt_fn >$expected_txt_fn
+    diff -i -u -U 9999 "$expected_txt_fn" "$current_txt_fn"
+}
+
 # Seals stdin to the seal metadata in the argument working directory. Output is
 # written to sealed.{priv,pub} in that directory.
 seal_data() {(
