@@ -5,8 +5,11 @@ cmd=$0
 inc_counter=
 krel=
 remove=
+seal_only=
 no_seal=
-while getopts 'ik:rsSnh' opt; do
+no_act=
+force=
+while getopts 'ik:rsSnfh' opt; do
     case "$opt" in
         i) inc_counter=1 ;;
         k) krel=$OPTARG ;;
@@ -14,6 +17,7 @@ while getopts 'ik:rsSnh' opt; do
         s) seal_only=1 ;;
         S) no_seal=1 ;;
         n) no_act=1 ;;
+        f) force=1 ;;
         h)
             cat >&2 <<EOF
 syntax: $(basename $0) <options>
@@ -28,6 +32,7 @@ parameters:
   -i                   Increment monotonic counter before sealing
   -k <kernel release>  Apply operation to given kernel release only
   -n                   No act: print command lines
+  -f                   Force: skip checks
 EOF
             exit 0
             ;;
@@ -54,16 +59,16 @@ do_or_show() {
 set -e
 
 if [ -n "$remove" ]; then
-    [ -n "$krel" ] || { echo "-r requires -k to be specified"; exit 1; }
+    [ -n "$force" -o -n "$krel" ] || { echo "-r requires -k to be specified"; exit 1; }
 
     rootdev=( $(get_device_info /) )
     cryptdev=( $(get_crypttab_entry "${rootdev[1]}") )
     do_or_show remove_luks_token "${cryptdev[1]}" "$krel"
     exit 0
 else
-    [ -z "$seal_only" -o -z "$no_seal" ] || { echo "conflicting operations -s and -S"; exit 1; }
-    [ -z "$no_seal" -o -z "$inc_counter" ] || { echo "cannot increment counter without sealing"; exit 1; }
-    [ -z "$inc_counter" -o -z "$krel" ] || { echo "cannot increment counter and specify kernel release"; exit 1; }
+    [ -n "$force" -o -z "$seal_only" -o -z "$no_seal" ] || { echo "conflicting operations -s and -S"; exit 1; }
+    [ -n "$force" -o -z "$no_seal" -o -z "$inc_counter" ] || { echo "cannot increment counter without sealing"; exit 1; }
+    [ -n "$force" -o -z "$inc_counter" -o -z "$krel" ] || { echo "cannot increment counter and specify kernel release"; exit 1; }
 
     if [ -z "$seal_only" ]; then
         do_or_show "$APPDIR"/emboot_install ${krel:+-k "$krel"}
@@ -71,11 +76,11 @@ else
         do_or_show "$APPDIR"/emboot_update_efi_boot_order
     fi
 
-    if [ -z "$no_seal" ]; then
-        if [ -n "$inc_counter" ]; then
-            do_or_show increment_counter
-        fi
+    if [ -n "$inc_counter" ]; then
+        do_or_show increment_counter
+    fi
 
+    if [ -z "$no_seal" ]; then
         if [ -n "$krel" ]; then
             do_or_show "$APPDIR"/emboot_seal_key -k "$krel"
         elif [ -n "$seal_only" ]; then

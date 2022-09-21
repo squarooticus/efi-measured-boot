@@ -50,7 +50,7 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
         fi
         outcome FAILED
 
-        verbose_do eval 'printf "  counter: current=%d expects>=%d\n" 0x$(xxd -p -c9999 <$tmpdir/current_counter)  0x$(xxd -p -c9999 <$tmpdir/counter)'
+        verbose_do eval 'printf "  counter: current=%d expects<=%d\n" 0x$(xxd -p -c9999 <$tmpdir/current_counter)  0x$(xxd -p -c9999 <$tmpdir/counter)'
         verbose_do eval 'diff_pcrs $tmpdir/pcrs $tmpdir/current_pcrs.txt | sed -e "s/^/  /"'
     done
 
