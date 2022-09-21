@@ -80,7 +80,7 @@ is_true() {
 # variables, temporarily disables errexit, and works on compound commands (with
 # eval).
 ignore_err() {
-    local do_nothing=$({ "$@"; } >&3 3>&-) 3>&1
+    local do_nothing=$({ "$@"; } >&2)
     return 0
 }
 

@@ -35,6 +35,8 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
     if [ -z "${cmd##./*}" ]; then APPDIR=.; fi
     . "${APPDIR:-.}"/functions
 
+    if is_verbose 5; then set -x; fi
+
     tmpdir=$(setup_tmp_dir)
 
     verbose_do eval 'read_pcrs >$tmpdir/current_pcrs.txt'
@@ -50,7 +52,7 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
         fi
         outcome FAILED
 
-        verbose_do eval 'printf "  counter: current=%d expects<=%d\n" 0x$(xxd -p -c9999 <$tmpdir/current_counter)  0x$(xxd -p -c9999 <$tmpdir/counter)'
+        verbose_do eval 'printf "  counter: current=%d expects<=%d\n" "0x$(xxd -p -c9999 <$tmpdir/current_counter)" "0x$(xxd -p -c9999 <$tmpdir/counter)"'
         verbose_do eval 'diff_pcrs $tmpdir/pcrs $tmpdir/current_pcrs.txt | sed -e "s/^/  /"'
     done
 
