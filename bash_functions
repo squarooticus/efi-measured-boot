@@ -520,8 +520,9 @@ install_loaders() {(
 
     if [ -n "$next_primary" ]; then
         if [ -z "$krel" -o "$next_primary" != "$primary" -o "$next_primary" = "$krel" ]; then
+            printf "%s" "$next_primary" >"$tmpdir"/krel-primary.txt
             echo "Creating primary EFI loader ($next_primary)"
-            create_efi_app "${kernels[0]}" /boot/initrd.img-"$next_primary" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
+            create_efi_app "${kernels[0]}" /boot/initrd.img-"$next_primary" "$tmpdir"/kernel-command-line.txt "$tmpdir"/krel-primary.txt "$tmpdir"/linux.efi
             lc_misc cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path emboot.efi)
             verbose_do -l 1 echo "Removing any existing tokens for $next_primary"
             remove_luks_token "${cryptdev[1]}" "$next_primary"
@@ -534,8 +535,9 @@ install_loaders() {(
 
     if [ -n "$next_old" ]; then
         if [ -z "$krel" -o "$next_old" != "$old" -o "$next_old" = "$krel" ]; then
+            printf "%s" "$next_old" >"$tmpdir"/krel-old.txt
             echo "Creating old EFI loader ($next_old)"
-            create_efi_app "${kernels[1]}" /boot/initrd.img-"$next_old" "$tmpdir"/kernel-command-line.txt "$tmpdir"/linux.efi
+            create_efi_app "${kernels[1]}" /boot/initrd.img-"$next_old" "$tmpdir"/kernel-command-line.txt "$tmpdir"/krel-old.txt "$tmpdir"/linux.efi
             lc_misc cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path emboot_old.efi)
             verbose_do -l 1 echo "Removing any existing tokens for $next_old"
             remove_luks_token "${cryptdev[1]}" "$next_old"
