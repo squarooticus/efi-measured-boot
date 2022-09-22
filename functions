@@ -370,32 +370,16 @@ diff_pcrs() {
     diff -i -u -U 9999 "$expected_txt_fn" "$current_txt_fn"
 }
 
-# Seals stdin to the seal metadata in the argument working directory. Output is
-# written to sealed.{priv,pub} in that directory.
-seal_data() {(
-    local workdir=${1:-.}
-    # Make sure we don't unintentionally send input to anything but
-    # tpm2_create. This is also the reason for the subshell: so we don't
-    # accidentally clobber the caller's stdin on early exit.
-    exec 3<&0 </dev/null
-    trap 'lc_tpm tpm2_flushcontext -Q -t' EXIT
-    rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
-    lc_tpm tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$workdir"/provision.ctx && \
-        lc_tpm tpm2_startauthsession -Q -S "$workdir"/session.ctx && \
-        lc_tpm tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
-        lc_tpm tpm2_policynv -Q -S "$workdir"/session.ctx -C o -i "$workdir"/counter -L "$workdir"/policy "$COUNTER_HANDLE" ule && \
-        lc_tpm tpm2_create -Q -C "$workdir"/provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - -L "$workdir"/policy -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub <&3 3<&-
-)}
-
-# Outputs a space-separated list of token IDs associated with emboot
+# Outputs a space-separated list of token IDs associated with emboot, and
+# kernel release (if specified)
 list_luks_token_ids() {
     local cryptdev=$1
     local krel=$2
     lc_crypt cryptsetup luksDump "$cryptdev" --dump-json-metadata | lc_misc jq -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'"${krel:+ and .\"value\".\"krel\" == \"$krel\"}"')) | map(.key) | join(" ")'
 }
 
-# Outputs the emboot seal metadata from a given token ID from the given LUKS
-# device to the given working directory
+# Outputs the expected platform state and sealed data from a given token ID
+# from the given LUKS device to the given working directory
 export_luks_token() {
     local workdir=${1:-.}
     local cryptdev=$2
@@ -411,8 +395,30 @@ export_luks_token() {
     return 0
 }
 
-# Attempts to unseal the sealed key using the emboot seal metadata from the
-# given working directory and output the plaintext to stdout
+# Seals stdin to the (expected future) platform state (PCRs and monotonic
+# counter value) from the argument working directory. Sealed data is written to
+# sealed.{priv,pub} in that directory.
+seal_data() {(
+    local workdir=${1:-.}
+    # Make sure we don't unintentionally send input to anything but
+    # tpm2_create. This is also the reason for the subshell: so we don't
+    # accidentally clobber the caller's stdin on early exit.
+    exec 3<&0 </dev/null
+    trap 'lc_tpm tpm2_flushcontext -Q -t' EXIT
+    rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
+    lc_tpm tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$workdir"/provision.ctx && \
+        lc_tpm tpm2_startauthsession -Q -S "$workdir"/session.ctx && \
+        lc_tpm tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
+        lc_tpm tpm2_policynv -Q -S "$workdir"/session.ctx -C o -i "$workdir"/counter -L "$workdir"/policy "$COUNTER_HANDLE" ule && \
+        lc_tpm tpm2_create -Q -C "$workdir"/provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - -L "$workdir"/policy -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub <&3 3<&-
+)}
+
+# Attempts to unseal the sealed data (sealed.{priv,pub}) from the given working
+# directory using the expected platform state (also from that working
+# directory) and output the plaintext to stdout. Will use current PCR values
+# and/or monotonic counter value in creating the policy session if the original
+# values are not available: on failure, this mainly impacts the error reported
+# by the TPM.
 unseal_data() {(
     local workdir=${1:-.}
     trap 'lc_tpm tpm2_flushcontext -Q -t' EXIT
