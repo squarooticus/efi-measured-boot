@@ -595,9 +595,12 @@ update_tokens() {(
         if [ -n "$all_kernels" -o "$krel" = "$primary" -o ${#token_ids} -eq 0 ]; then
             echo "Creating token for primary EFI loader ($primary)"
             seal_and_create_token "$tmpdir" "${cryptdev[1]}" "$(emboot_loader_unix_path)" "$primary"
+        else
+            verbose_do -l 1 echo "Existing token for primary EFI loader ($primary): not sealing"
         fi
     else
-        verbose_do -l 1 echo "Existing token for primary EFI loader ($primary): not sealing"
+        echo "No primary kernel listed in $esf"
+        echo "WARNING: primary emboot EFI entry may be unbootable!"
     fi
 
     if [ -n "$old" ]; then
@@ -605,9 +608,9 @@ update_tokens() {(
         if [ -n "$all_kernels" -o "$krel" = "$old" -o ${#token_ids} -eq 0 ]; then
             echo "Creating token for old EFI loader ($old)"
             seal_and_create_token "$tmpdir" "${cryptdev[1]}" "$(emboot_loader_unix_path emboot_old.efi)" "$old"
+        else
+            verbose_do -l 1 echo "Existing token for old EFI loader ($old): not sealing"
         fi
-    else
-        verbose_do -l 1 echo "Existing token for old EFI loader ($old): not sealing"
     fi
 
     exit 0
