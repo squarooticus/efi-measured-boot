@@ -48,7 +48,8 @@ for i in "$OTHER_HOOKS_DIR/post-update.d" "$KERNEL_HOOKS_DIR/postinst.d" "$KERNE
 done
 
 mkdir -p "$APPDIR"
-cp -f bash_functions emboot_install emboot_seal_key emboot_unseal.sh emboot_update_efi_apps emboot_update_efi_boot_order functions "$APPDIR/"
+rm -f "$APPDIR"/emboot_install "$APPDIR"/emboot_seal_key "$APPDIR"/emboot_update_efi_apps "$APPDIR"/emboot_update_efi_boot_order
+cp -f bash_functions emboot_unseal.sh functions "$APPDIR/"
 
 mkdir -p "$BINDIR"
 cp -f update-emboot "$BINDIR/"

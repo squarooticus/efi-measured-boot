@@ -17,6 +17,5 @@ step2: checks
 	@echo "Step two complete: reboot (using your LUKS passphrase when prompted) and run make step3 if successful" >&2
 
 step3: checks
-	@./emboot_seal_key
-	@./emboot_update_efi_boot_order
+	@./update-emboot -s
 	@echo "Installation complete: update-emboot will be run automatically whenever kernels are installed or removed or when initrds are updated" >&2
