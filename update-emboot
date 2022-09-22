@@ -1,5 +1,7 @@
 #! /bin/bash
 
+exec 3>&1 >&2
+
 cmd=$0
 
 inc_counter=
@@ -9,7 +11,8 @@ seal_only=
 no_seal=
 no_act=
 force=
-while getopts 'ik:rsSnfh' opt; do
+verbose_add=0
+while getopts 'ik:rsSnfvh' opt; do
     case "$opt" in
         i) inc_counter=1 ;;
         k) krel=$OPTARG ;;
@@ -18,8 +21,9 @@ while getopts 'ik:rsSnfh' opt; do
         S) no_seal=1 ;;
         n) no_act=1 ;;
         f) force=1 ;;
+        v) (( verbose_add++ )) ;;
         h)
-            cat >&2 <<EOF
+            cat <<EOF
 syntax: $(basename $0) <options>
 
 operations: (default is to update loaders and seal)
@@ -33,24 +37,26 @@ parameters:
   -k <kernel release>  Apply operation to given kernel release only
   -n                   No act: print command lines
   -f                   Force: skip checks
+  -v                   Increase verbosity
 EOF
             exit 0
             ;;
-        :) echo "$OPTARG requires an argument" >&2; exit 1;;
-        ?) echo "unknown argument" >&2; exit 1;;
+        :) echo "$OPTARG requires an argument"; exit 1;;
+        ?) echo "unknown argument"; exit 1;;
     esac
 done
 shift $((OPTIND-1))
 
 [ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
 if [[ $cmd = ./* ]]; then APPDIR=.; fi
-. "${APPDIR:-.}"/functions
 . "${APPDIR:-.}"/bash_functions
+
+(( EMBOOT_VERBOSE += verbose_add ))
 
 do_or_show() {
     if [ -n "$no_act" ]; then
-        quote_args "$@" >&2
-        printf "\n" >&2
+        quote_args "$@"
+        printf "\n"
     else
         "$@"
     fi
@@ -71,9 +77,9 @@ else
     [ -n "$force" -o -z "$inc_counter" -o -z "$krel" ] || { echo "cannot increment counter and specify kernel release"; exit 1; }
 
     if [ -z "$seal_only" ]; then
-        do_or_show "$APPDIR"/emboot_install ${krel:+-k "$krel"}
-        do_or_show "$APPDIR"/emboot_update_efi_apps
-        do_or_show "$APPDIR"/emboot_update_efi_boot_order
+        do_or_show install_loaders ${krel:+-k "$krel"}
+        do_or_show update_efi_entries
+        do_or_show update_efi_boot_order
     fi
 
     if [ -n "$inc_counter" ]; then
@@ -82,11 +88,11 @@ else
 
     if [ -z "$no_seal" ]; then
         if [ -n "$krel" ]; then
-            do_or_show "$APPDIR"/emboot_seal_key -k "$krel"
+            do_or_show update_tokens -k "$krel"
         elif [ -n "$seal_only" ]; then
-            do_or_show "$APPDIR"/emboot_seal_key -a
+            do_or_show update_tokens -a
         else
-            do_or_show "$APPDIR"/emboot_seal_key
+            do_or_show update_tokens
         fi
     fi
 fi

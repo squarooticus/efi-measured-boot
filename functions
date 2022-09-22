@@ -1,5 +1,9 @@
 #! /bin/sh
 
+EMBOOT_VERBOSE=${EMBOOT_VERBOSE:-${VERBOSE:-0}}
+
+export EMBOOT_VERBOSE
+
 # Sets up a temporary working directory in the standard way
 setup_tmp_dir() {
     mktemp -d -t emboot-XXXXXXXXXX
@@ -84,9 +88,9 @@ ignore_err() {
     return 0
 }
 
-# Returns 0 if $VERBOSE >= the given argument (or >= 1 if unspecified)
+# Returns 0 if $EMBOOT_VERBOSE >= the given argument (or >= 1 if unspecified)
 is_verbose() {
-    [ -z "$VERBOSE" ] || [ "$VERBOSE" -ge "${1:-1}" ]
+    [ -z "$EMBOOT_VERBOSE" ] || [ "$EMBOOT_VERBOSE" -ge "${1:-1}" ]
 }
 
 # Runs the given command, ignoring errors, if `is_verbose [<value for -l>]`.
@@ -107,6 +111,62 @@ verbose_do() {
         ignore_err "$@"
     fi
 }
+
+# Categorizes the given file descriptor by type:
+#  $ = tty
+#  - = /dev/null or closed
+#  | = pipe
+#  * = regular file
+#  ? = anything else
+fd_type() {
+    fd=$1
+    fdfile=/proc/self/fd/$fd
+    if [ -t "$fd" ]; then printf '$';
+    elif [ ! -e "$fdfile" -o "$(readlink -f "$fdfile")" = "/dev/null" ]; then printf '-';
+    elif [ -f "$fdfile" ]; then printf '*';
+    elif [ -p "$fdfile" ]; then printf '|';
+    else printf '?'; fi
+    return 0
+}
+
+# Additional info about the given file descriptor that is appended to the log
+# line
+fd_info() {
+    fd=$1
+    fdfile=/proc/self/fd/$fd
+    if [ "$(fd_type $1)" = '*' ]; then printf "%s" "$(readlink -f "$fdfile")"; fi
+}
+
+# Logs the given command to stderr if `is_verbose [<value for -l>]`. Runs the
+# command regardless.
+log_command() {
+    local OPTIND
+    local OPTARG
+    local level=1
+    while getopts 'l:' opt; do
+        case "$opt" in
+            l) level=$OPTARG ;;
+            ?) return 1;;
+        esac
+    done
+    shift $((OPTIND-1))
+    if is_verbose $level; then
+        cmd=$(quote_args "$@")
+        fdi=$(fd_info 0)
+        printf "  %s %s%s\n" "$(fd_type 0)" "$cmd" "${fdi:+" <$fdi"}" >&2
+    fi
+    "$@"
+}
+
+LL_TPM=3
+LL_CRYPT=3
+LL_EFI=3
+LL_MISC=4
+
+lc_tpm()   { log_command -l $LL_TPM "$@"; }
+lc_crypt() { log_command -l $LL_CRYPT "$@"; }
+lc_efi()   { log_command -l $LL_EFI "$@"; }
+lc_misc()  { log_command -l $LL_MISC "$@"; }
 
 # Self-explanatory. From
 # https://github.com/mateusza/shellscripthttpd/blob/master/base64.sh
@@ -246,7 +306,7 @@ create_efi_app() {
     local initrd=$2
     local kcli=$3
     local output=$4
-    objcopy --add-section .osrel="/usr/lib/os-release" --change-section-vma .osrel=0x20000 \
+    lc_efi objcopy --add-section .osrel="/usr/lib/os-release" --change-section-vma .osrel=0x20000 \
         --add-section .cmdline="$kcli" --change-section-vma .cmdline=0x30000 \
         --add-section .linux="$kernel" --change-section-vma .linux=0x2000000 \
         --add-section .initrd="$initrd" --change-section-vma .initrd=0x3000000 \
@@ -255,17 +315,17 @@ create_efi_app() {
 
 # Increments the monotonic counter
 increment_counter() {
-    tpm2_nvincrement -C o "$COUNTER_HANDLE"
+    lc_tpm tpm2_nvincrement -C o "$COUNTER_HANDLE"
 }
 
 # Outputs the current value of the monotonic counter
 read_counter() {
-    tpm2_nvread -C o "$COUNTER_HANDLE" -s 8
+    lc_tpm tpm2_nvread -C o "$COUNTER_HANDLE" -s 8
 }
 
 # Writes the configured PCRs, either to the argument filename or to stdout
 read_pcrs() {
-    tpm2_pcrread ${1:+-Q} sha256:"$SEAL_PCRS"${1:+ -o "$1"}
+    lc_tpm tpm2_pcrread ${1:+-Q} sha256:"$SEAL_PCRS"${1:+ -o "$1"}
 }
 
 # Writes future PCR predictions to the first arg working directory, passing the
@@ -273,7 +333,7 @@ read_pcrs() {
 predict_future_pcrs() {
     local workdir=${1:-.}
     shift
-    tpm_futurepcr -L "$SEAL_PCRS" -H sha256 "$@" -o "$workdir"/pcrs
+    lc_tpm tpm_futurepcr -L "$SEAL_PCRS" -H sha256 "$@" -o "$workdir"/pcrs
 }
 
 # Splits a string into multiple newline-separated strings of at most the given
@@ -316,20 +376,20 @@ seal_data() {(
     # tpm2_create. This is also the reason for the subshell: so we don't
     # accidentally clobber the caller's stdin on early exit.
     exec 3<&0 </dev/null
-    trap 'tpm2_flushcontext -Q -t' EXIT
+    trap 'lc_tpm tpm2_flushcontext -Q -t' EXIT
     rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
-    tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$workdir"/provision.ctx && \
-        tpm2_startauthsession -Q -S "$workdir"/session.ctx && \
-        tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
-        tpm2_policynv -Q -S "$workdir"/session.ctx -C o -i "$workdir"/counter -L "$workdir"/policy "$COUNTER_HANDLE" ule && \
-        <&3 3<&- tpm2_create -Q -C "$workdir"/provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - -L "$workdir"/policy -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub
+    lc_tpm tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$workdir"/provision.ctx && \
+        lc_tpm tpm2_startauthsession -Q -S "$workdir"/session.ctx && \
+        lc_tpm tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
+        lc_tpm tpm2_policynv -Q -S "$workdir"/session.ctx -C o -i "$workdir"/counter -L "$workdir"/policy "$COUNTER_HANDLE" ule && \
+        lc_tpm tpm2_create -Q -C "$workdir"/provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - -L "$workdir"/policy -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub <&3 3<&-
 )}
 
 # Outputs a space-separated list of token IDs associated with emboot
 list_luks_token_ids() {
     local cryptdev=$1
     local krel=$2
-    cryptsetup luksDump "$cryptdev" --dump-json-metadata | jq -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'"${krel:+ and .\"value\".\"krel\" == \"$krel\"}"')) | map(.key) | join(" ")'
+    lc_crypt cryptsetup luksDump "$cryptdev" --dump-json-metadata | lc_misc jq -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'"${krel:+ and .\"value\".\"krel\" == \"$krel\"}"')) | map(.key) | join(" ")'
 }
 
 # Outputs the emboot seal metadata from a given token ID from the given LUKS
@@ -338,13 +398,13 @@ export_luks_token() {
     local workdir=${1:-.}
     local cryptdev=$2
     local token_id=$3
-    md=$(cryptsetup token export "$cryptdev" --token-id "$token_id" 2>/dev/null)
+    md=$(lc_crypt cryptsetup token export "$cryptdev" --token-id "$token_id" 2>/dev/null)
     if [ -z "$md" ]; then
         return 1
     fi
     for k in counter pcrs sealed.priv sealed.pub; do
         rm -f "$workdir/$k"
-        printf %s "$md" | jq -j ".\"$k\"" | b64decode >"$workdir/$k"
+        printf %s "$md" | lc_crypt jq -j ".\"$k\"" | b64decode >"$workdir/$k"
     done
     return 0
 }
@@ -353,17 +413,17 @@ export_luks_token() {
 # given working directory and output the plaintext to stdout
 unseal_data() {(
     local workdir=${1:-.}
-    trap 'tpm2_flushcontext -Q -t' EXIT
+    trap 'lc_tpm tpm2_flushcontext -Q -t' EXIT
     if [ ! -r "$workdir"/pcrs ]; then
         read_pcrs "$workdir"/pcrs || return 1
     fi
     if [ ! -r "$workdir"/counter ]; then
         read_counter >"$workdir"/counter || return 1
     fi
-    tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$workdir"/provision.ctx && \
-        tpm2_load -Q -C "$workdir"/provision.ctx -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub -c "$workdir"/load.ctx && \
-        tpm2_startauthsession -Q -S "$workdir"/session.ctx --policy-session && \
-        tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
-        tpm2_policynv -Q -C o -S "$workdir"/session.ctx -i "$workdir"/counter "$COUNTER_HANDLE" ule && \
-        tpm2_unseal -Q -c "$workdir"/load.ctx -p session:"$workdir"/session.ctx
+    lc_tpm tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$workdir"/provision.ctx && \
+        lc_tpm tpm2_load -Q -C "$workdir"/provision.ctx -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub -c "$workdir"/load.ctx && \
+        lc_tpm tpm2_startauthsession -Q -S "$workdir"/session.ctx --policy-session && \
+        lc_tpm tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
+        lc_tpm tpm2_policynv -Q -C o -S "$workdir"/session.ctx -i "$workdir"/counter "$COUNTER_HANDLE" ule && \
+        lc_tpm tpm2_unseal -Q -c "$workdir"/load.ctx -p session:"$workdir"/session.ctx
 )}
