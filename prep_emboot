@@ -54,6 +54,8 @@ cp -f bash_functions emboot_unseal.sh functions "$APPDIR/"
 mkdir -p "$BINDIR"
 cp -f update-emboot "$BINDIR/"
 
+rm -f /boot/efi/EFI/debian/emboot.state
+
 (cd tpm_futurepcr && pip3 install .)
 
 rootdevinfo=( $(get_device_info /) )

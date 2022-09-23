@@ -48,8 +48,8 @@ done
 shift $((OPTIND-1))
 
 [ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
-if [[ $cmd = ./* ]]; then APPDIR=.; fi
-. "${APPDIR:-.}"/bash_functions
+[[ $cmd != ./* ]] || APPDIR=.
+. "${APPDIR:-.}"/bash_functions || exit 1
 
 (( EMBOOT_VERBOSE += verbose_add ))
 

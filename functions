@@ -171,9 +171,9 @@ lc_misc()  { log_command -l $LL_MISC "$@"; }
 # Self-explanatory. From
 # https://github.com/mateusza/shellscripthttpd/blob/master/base64.sh
 b64encode() {
-    local wrap=65
     local OPTIND
     local OPTARG
+    local wrap=65
     while getopts 'w:' opt; do
         case "$opt" in
             w) wrap=$OPTARG ;;
@@ -275,11 +275,6 @@ efi_path_to_unix() {
     printf %s%s\\n "$1" | sed -e 's/\\/\//g'
 }
 
-# Outputs the emboot state file on the EFI system partition
-emboot_state_file() {
-    printf %s "$EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot.state"
-}
-
 # Outputs the kernel release for each given input kernel path. Requires that
 # the kernel filenames match vmlinuz-<release>, and fails otherwise.
 kernel_path_to_release() {
@@ -301,7 +296,7 @@ kernel_path_to_release() {
 # Builds an EFI app from the given files (kernel image, initrd, kernel command
 # line, and kernel release number) along with the host OS release file and the
 # configured EFI stub, and writes it to the given output filename
-create_efi_app() {
+create_loader() {
     local kernel=$1
     local initrd=$2
     local kcli=$3
@@ -313,6 +308,18 @@ create_efi_app() {
         --add-section .linux="$kernel" --change-section-vma .linux=0x2000000 \
         --add-section .initrd="$initrd" --change-section-vma .initrd=0x3000000 \
         /usr/lib/systemd/boot/efi/linuxx64.efi.stub "$output"
+}
+
+extract_krel_from_loader() {
+    local workdir=$1
+    local loader=$2
+
+    local of=$workdir/cur_krel.txt
+    rm -f "$of"
+    lc_efi objcopy -O binary --only-section=.krel "$loader" "$of"
+    krel=$(cat "$of")
+    rm -f "$of"
+    [ -n "$krel" ] && printf "%s" "$krel"
 }
 
 # Increments the monotonic counter
@@ -416,7 +423,7 @@ seal_data() {(
 # Attempts to unseal the sealed data (sealed.{priv,pub}) from the given working
 # directory using the expected platform state (also from that working
 # directory) and output the plaintext to stdout. Will use current PCR values
-# and/or monotonic counter value in creating the policy session if the original
+# and/or monotonic counter value in creating the policy session if the expected
 # values are not available: on failure, this mainly impacts the error reported
 # by the TPM.
 unseal_data() {(

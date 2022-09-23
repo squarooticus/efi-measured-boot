@@ -1,6 +1,10 @@
 #! /bin/bash
 
-. "${APPDIR:-.}"/functions
+if [ -r "${APPDIR:-.}"/functions ]; then
+    . "${APPDIR:-.}"/functions
+else
+    . "$(dirname $0)"/functions || exit 1
+fi
 
 # Shell quotes with an attempt to make the result human-readable.
 quote_args() {
@@ -474,7 +478,9 @@ update_efi_boot_order() {(
 install_loaders() {(
     set -e
 
-    krel=
+    local OPTIND
+    local OPTARG
+    local krel=
     while getopts 'k:' opt; do
         case "$opt" in
             k) krel=$OPTARG ;;
@@ -505,52 +511,50 @@ install_loaders() {(
         exit 1
     fi
 
-    echo "root=UUID=${rootdev[0]} cryptdevice=${cryptdev[1]}:${cryptdev[0]} $KERNEL_PARAMS" >"$tmpdir"/kernel-command-line.txt
+    echo "root=UUID=${rootdev[0]} cryptdevice=${cryptdev[1]}:${cryptdev[0]} $KERNEL_PARAMS" >"$tmpdir"/kcli.txt
 
     kernels=( $(list_installed_kernels) )
-
-    statefile=$(emboot_state_file)
-
-    [ ! -r "$statefile" ] || . "$statefile"
 
     set +e
 
     next_primary=$(kernel_path_to_release "${kernels[0]}")
     next_old=$(kernel_path_to_release "${kernels[1]}")
 
-    if [ -n "$next_primary" ]; then
-        if [ -z "$krel" -o "$next_primary" != "$primary" -o "$next_primary" = "$krel" ]; then
-            printf "%s" "$next_primary" >"$tmpdir"/krel-primary.txt
-            echo "Creating primary EFI loader ($next_primary)"
-            create_efi_app "${kernels[0]}" /boot/initrd.img-"$next_primary" "$tmpdir"/kernel-command-line.txt "$tmpdir"/krel-primary.txt "$tmpdir"/linux.efi
-            lc_misc cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path emboot.efi)
-            verbose_do -l 1 echo "Removing any existing tokens for $next_primary"
-            remove_luks_token "${cryptdev[1]}" "$next_primary"
-        fi
-    else
-        echo "No primary kernel configured"
-        lc_misc rm -f "$(emboot_loader_unix_path emboot.efi)"
-        echo "WARNING: primary emboot EFI entry is unbootable!"
-    fi
+    for suffix in "" "_old"; do
+        loader=$(emboot_loader_unix_path "emboot${suffix}.efi")
+        kernel=${kernels[0]}
 
-    if [ -n "$next_old" ]; then
-        if [ -z "$krel" -o "$next_old" != "$old" -o "$next_old" = "$krel" ]; then
-            printf "%s" "$next_old" >"$tmpdir"/krel-old.txt
-            echo "Creating old EFI loader ($next_old)"
-            create_efi_app "${kernels[1]}" /boot/initrd.img-"$next_old" "$tmpdir"/kernel-command-line.txt "$tmpdir"/krel-old.txt "$tmpdir"/linux.efi
-            lc_misc cp -f "$tmpdir"/linux.efi $(emboot_loader_unix_path emboot_old.efi)
-            verbose_do -l 1 echo "Removing any existing tokens for $next_old"
-            remove_luks_token "${cryptdev[1]}" "$next_old"
-        fi
-    else
-        lc_misc rm -f "$(emboot_loader_unix_path emboot_old.efi)"
-    fi
+        if [ -n "$kernel" ]; then
+            loader_krel=$(kernel_path_to_release "$kernel")
+            initrd=/boot/initrd.img-"$loader_krel"
+            kernels=( "${kernels[@]:1}" )
 
-    rm -f "$statefile"
-    cat >$statefile <<EOF
-primary=$(quote_args "$next_primary")
-old=$(quote_args "$next_old")
-EOF
+            if [ -z "$krel" -o "$loader_krel" = "$krel" ]; then
+                if [ ! -e "$initrd" ]; then
+                    echo "Initrd image $initrd for $loader_krel unavailable to create loader $loader"
+                    lc_misc rm -f "$loader"
+                    if [ -z "$suffix" ]; then
+                        echo "WARNING: primary emboot EFI entry is unbootable!"
+                    fi
+                else
+                    printf "%s" "$loader_krel" >"$tmpdir"/krel.txt
+                    echo "Creating EFI loader $loader for $loader_krel"
+                    create_loader "$kernel" "$initrd" "$tmpdir"/kcli.txt "$tmpdir"/krel.txt "$tmpdir"/linux.efi
+                    lc_misc cp -f "$tmpdir"/linux.efi "$loader"
+                    verbose_do -l 1 echo "Removing any existing tokens for $loader_krel"
+                    remove_luks_token "${cryptdev[1]}" "$loader_krel"
+                fi
+            else
+                verbose_do -l 1 echo "Skipping creation of EFI loader $loader for $loader_krel"
+            fi
+        else
+            echo "No kernel available to create loader $loader"
+            lc_misc rm -f "$loader"
+            if [ -z "$suffix" ]; then
+                echo "WARNING: primary emboot EFI entry is unbootable!"
+            fi
+        fi
+    done
 
     exit 0
 )}
@@ -558,6 +562,8 @@ EOF
 update_tokens() {(
     set -e
 
+    local OPTIND
+    local OPTARG
     local krel=
     local all_kernels=
     while getopts 'k:a' opt; do
@@ -569,9 +575,6 @@ update_tokens() {(
         esac
     done
     shift $((OPTIND-1))
-
-    local esf=$(emboot_state_file)
-    [ ! -r "$esf" ] || . "$esf"
 
     cleanup() {
         rc=$?
@@ -592,28 +595,31 @@ update_tokens() {(
     rootdev=( $(get_device_info /) )
     cryptdev=( $(get_crypttab_entry "${rootdev[1]}") )
 
-    if [ -n "$primary" ]; then
-        token_ids=( $(list_luks_token_ids "${cryptdev[1]}" "$primary") )
-        if [ -n "$all_kernels" -o "$krel" = "$primary" -o ${#token_ids} -eq 0 ]; then
-            echo "Creating token for primary EFI loader ($primary)"
-            seal_and_create_token "$tmpdir" "${cryptdev[1]}" "$(emboot_loader_unix_path)" "$primary"
+    for suffix in "" "_old"; do
+        loader=$(emboot_loader_unix_path "emboot${suffix}.efi")
+        if [ -e "$loader" ]; then
+            loader_krel=$(extract_krel_from_loader "$tmpdir" "$loader")
+            if [ -n "$loader_krel" ]; then
+                token_ids=( $(list_luks_token_ids "${cryptdev[1]}" "$loader_krel") )
+                if [ -n "$all_kernels" -o "$krel" = "$loader_krel" -o ${#token_ids} -eq 0 ]; then
+                    echo "Creating token for EFI loader $loader for $loader_krel"
+                    seal_and_create_token "$tmpdir" "${cryptdev[1]}" "$loader" "$loader_krel"
+                else
+                    verbose_do -l 1 echo "Preserving existing token for EFI loader $loader for $loader_krel"
+                fi
+            else
+                echo "Unable to extract kernel release from EFI loader $loader"
+                if [ -z "$suffix" ]; then
+                    echo "WARNING: primary emboot EFI entry may be unbootable or may require manual passphrase entry!"
+                fi
+            fi
         else
-            verbose_do -l 1 echo "Existing token for primary EFI loader ($primary): not sealing"
+            echo "EFI loader $loader does not exist"
+            if [ -z "$suffix" ]; then
+                echo "WARNING: primary emboot EFI entry is unbootable!"
+            fi
         fi
-    else
-        echo "No primary kernel listed in $esf"
-        echo "WARNING: primary emboot EFI entry may be unbootable!"
-    fi
-
-    if [ -n "$old" ]; then
-        token_ids=( $(list_luks_token_ids "${cryptdev[1]}" "$old") )
-        if [ -n "$all_kernels" -o "$krel" = "$old" -o ${#token_ids} -eq 0 ]; then
-            echo "Creating token for old EFI loader ($old)"
-            seal_and_create_token "$tmpdir" "${cryptdev[1]}" "$(emboot_loader_unix_path emboot_old.efi)" "$old"
-        else
-            verbose_do -l 1 echo "Existing token for old EFI loader ($old): not sealing"
-        fi
-    fi
+    done
 
     exit 0
 )}

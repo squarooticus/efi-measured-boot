@@ -20,19 +20,19 @@ trap 'rc=$?; [ -z "$UNSEAL_PAUSE" ] || sleep "$UNSEAL_PAUSE"; [ "$rc" -eq 0 ] &&
 
 set -e
 
-outcome() {
-    echo "EFI measured boot unseal $1"
-    if [ "$1" != succeeded ] || is_verbose; then
-        [ -z "${CRYPTTAB_SOURCE}" ] || echo "  backing device: ${CRYPTTAB_SOURCE}"
-        [ -z "${CRYPTTAB_NAME}" ] || echo "  mapped name: ${CRYPTTAB_NAME}"
-        echo "  token ID: $tid"
-        echo "  kernel release: $krel"
-    fi
-}
-
 if [ "$CRYPTTAB_TRIED" = 0 ]; then
+    outcome() {
+        echo "EFI measured boot unseal $1"
+        if [ "$1" != succeeded ] || is_verbose; then
+            [ -z "${CRYPTTAB_SOURCE}" ] || echo "  backing device: ${CRYPTTAB_SOURCE}"
+            [ -z "${CRYPTTAB_NAME}" ] || echo "  mapped name: ${CRYPTTAB_NAME}"
+            echo "  token ID: $tid"
+            echo "  kernel release: $krel"
+        fi
+    }
+
     . /etc/efi-measured-boot/config
-    if [ -z "${cmd##./*}" ]; then APPDIR=.; fi
+    [ -n "${cmd##./*}" ] || APPDIR=.
     . "${APPDIR:-.}"/functions
 
     if is_verbose 5; then set -x; fi
