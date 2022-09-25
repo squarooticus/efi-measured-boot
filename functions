@@ -397,7 +397,7 @@ export_luks_token() {
     fi
     for k in counter pcrs sealed.priv sealed.pub; do
         rm -f "$workdir/$k"
-        printf %s "$md" | lc_crypt jq -j ".\"$k\"" | b64decode >"$workdir/$k"
+        printf %s "$md" | lc_misc jq -j ".\"$k\"" | b64decode >"$workdir/$k"
     done
     return 0
 }
