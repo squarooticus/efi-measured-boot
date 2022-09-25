@@ -285,29 +285,47 @@ list_installed_kernels() {(
 )}
 
 # Populates:
-#  * An associative array `efi_apps` mapping uppercase loader path to a
-#  tab-separated string with fields (bootnum, display name, partition UUID,
-#  loader)
-#  * An array `efi_boot_order` containing the boot order (each element of which
-#  is 4 hex digits)
-#  * A string `efi_boot_current` containing the current boot entry (also 4 hex
-#  digits)
+#
+#   - An associative array `efi_apps` mapping uppercase loader path to a
+#   tab-separated string with fields (bootnum, display name, partition UUID,
+#   loader)
+#
+#   - An array `efi_boot_order` containing the boot order (each element of
+#   which is 4 hex digits)
+#
+#   - A string `efi_boot_current` containing the current boot entry (also 4 hex
+#   digits)
+#
+# Caches the result. Use `evict_efi_vars` to evict this cache if the EFI vars
+# are known to have changed.
 read_efi_vars() {
-    declare -gA efi_apps; efi_apps=()
-    local oldIFS=$IFS
-    local IFS=$'\t'
-    local loader bootnum desc partuuid
-    while read -r loader bootnum desc partuuid; do
-        verbose_do -l $LL_EFI eval 'printf "  reading EFI entry %s: desc=%s partuuid=%s loader=%s\n" "$bootnum" "$desc" "$partuuid" "$loader" >&2'
-        efi_apps[$(printf %s "$loader" | tr a-z A-Z)]="$bootnum"$'\t'"$desc"$'\t'"$partuuid"$'\t'"$loader"
-    done < <(lc_efi efibootmgr -v | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-fA-F-]\+\),.*File(\([^)]\+\)).*/\4\t\1\t\2\t\3/')
-    declare -ga efi_boot_order
-    local IFS=','
-    efi_boot_order=( $(efibootmgr -v | grep '^BootOrder' | sed -e 's/^BootOrder: *//') )
-    local IFS=$oldIFS
-    verbose_do -l $LL_EFI eval 'printf "  EFI boot order: ${efi_boot_order[*]}\n" >&2'
-    efi_boot_current=$(efibootmgr -v | grep '^BootCurrent' | sed -e 's/^BootCurrent: *//')
-    verbose_do -l $LL_EFI eval 'printf "  EFI boot current: %s\n" "$efi_boot_current" >&2'
+    if [ -z "$efi_vars_available" ]; then
+        declare -gA efi_apps=()
+        local oldIFS=$IFS
+        local IFS=$'\t'
+        local loader bootnum desc partuuid
+        while read -r loader bootnum desc partuuid; do
+            verbose_do -l $LL_EFI eval 'printf "  reading EFI entry %s: desc=%s partuuid=%s loader=%s\n" "$bootnum" "$desc" "$partuuid" "$loader" >&2'
+            efi_apps[$(printf %s "$loader" | tr a-z A-Z)]="$bootnum"$'\t'"$desc"$'\t'"$partuuid"$'\t'"$loader"
+        done < <(lc_efi efibootmgr -v | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-fA-F-]\+\),.*File(\([^)]\+\)).*/\4\t\1\t\2\t\3/')
+
+        local IFS=','
+        declare -ga efi_boot_order
+        efi_boot_order=( $(efibootmgr -v | grep '^BootOrder' | sed -e 's/^BootOrder: *//') )
+        local IFS=$oldIFS
+        verbose_do -l $LL_EFI eval 'printf "  EFI boot order: ${efi_boot_order[*]}\n" >&2'
+
+        declare -g efi_boot_current
+        efi_boot_current=$(efibootmgr -v | grep '^BootCurrent' | sed -e 's/^BootCurrent: *//')
+        verbose_do -l $LL_EFI eval 'printf "  EFI boot current: %s\n" "$efi_boot_current" >&2'
+
+        declare -g efi_vars_available=1
+    fi
+    return 0
+}
+
+evict_efi_vars() {
+    declare -g efi_vars_available=
 }
 
 # Given a loader filename (no path: it must be in
@@ -325,24 +343,63 @@ create_emboot_efi_entry() {
     lc_efi efibootmgr -C -d "$efidisk" -p "$efipartition" -l "$loader" -L "$OS_SHORT_NAME emboot${tag:+ ($tag)}"
 }
 
+# Given a crypto device, populates `luksmd` with the output of dumping the LUKS
+# metadata for the crypto device in JSON format.
+read_luks_metadata() {
+    local cryptdev=$1
+    declare -gA luksmd
+    [ -n "${luksmd[$cryptdev]}" ] || luksmd[$cryptdev]=$(lc_crypt cryptsetup luksDump "$cryptdev" --dump-json-metadata)
+    return 0
+}
+
+# Evicts the cache for the given device or for all devices
+evict_luks_metadata() {
+    local cryptdev=$1
+    declare -gA luksmd
+    if [ -n "$cryptdev" ]; then
+        luksmd[$cryptdev]=
+    else
+        luksmd=()
+    fi
+}
+
+# Outputs a space-separated list of token IDs associated with emboot, and
+# kernel release (if specified). Bash version making use of associative array.
+list_luks_token_ids() {
+    local cryptdev=$1
+    local krel=$2
+    read_luks_metadata "$cryptdev"
+    printf "%s" "${luksmd[$cryptdev]:-$(lc_crypt cryptsetup luksDump "$cryptdev" --dump-json-metadata)}" | lc_misc jq -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'"${krel:+ and .\"value\".\"krel\" == \"$krel\"}"')) | map(.key) | sort | join(" ")'
+}
+
 # Outputs the index of the emboot key slot. If there is an existing emboot
 # token, pulls this directly from it; if not, tests the key against all
 # keyslots until it finds a match.
 get_emboot_key_slot() {
     local cryptdev=$1
+    read_luks_metadata "$cryptdev"
     local emboot_token_ids=( $(list_luks_token_ids "$cryptdev") )
+    local first_keyslot
     if (( ${#emboot_token_ids[@]} > 0 )); then
         local one_token_id=${emboot_token_ids[0]}
-        local first_keyslot=$(lc_crypt cryptsetup luksDump "$cryptdev" --dump-json-metadata | lc_misc jq -j '.tokens."'"$one_token_id"'".keyslots | first')
+        first_keyslot=$(printf "%s" "${luksmd[$cryptdev]}" | lc_misc jq -j '.tokens."'"$one_token_id"'".keyslots | first')
         if [ -n "$first_keyslot" -a "$first_keyslot" != "null" ]; then
-            printf %s "$first_keyslot"
-            return 0
+            if lc_crypt cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" --key-slot "$first_keyslot" "$cryptdev" </dev/null >/dev/null 2>&1; then
+                verbose_do -l 1 echo "Passphrase found in keyslot $first_keyslot (from token $one_token_id)" >&2
+                printf %s "$first_keyslot"
+                return 0
+            else
+                verbose_do -l 1 echo "Passphrase NOT found in keyslot $first_keyslot from token $one_token_id" >&2
+            fi
         fi
     fi
-    local keyslots=( $(lc_crypt cryptsetup luksDump "$cryptdev" --dump-json-metadata | lc_misc jq -j '.keyslots | keys | join(" ")') )
+    local keyslots=( $(printf "%s" "${luksmd[$cryptdev]}" | lc_misc jq -j '.keyslots | keys | join(" ")') )
     local i
     for i in "${keyslots[@]}"; do
-        if lc_crypt cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" --key-slot "$i" "$cryptdev" </dev/null >/dev/null 2>&1; then
+        if [ "$i" = "$first_keyslot" ]; then
+            verbose_do -l 1 echo "Skipping keyslot $i" >&2
+        elif lc_crypt cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" --key-slot "$i" "$cryptdev" </dev/null >/dev/null 2>&1; then
+            verbose_do -l 1 echo "Passphrase found in keyslot $i" >&2
             printf %s "$i"
             return 0
         fi
@@ -357,7 +414,7 @@ import_luks_token() {
     local cryptdev=$2
     local krel=$3
     declare -a args
-    local json=''
+    local json=
     local k
     for k in counter pcrs sealed.priv sealed.pub; do
         b64encode -w 0 <$workdir/$k >$workdir/$k.b64
@@ -375,6 +432,8 @@ import_luks_token() {
         lc_crypt cryptsetup token remove "$cryptdev" --token-id "$k"
     done
     lc_crypt cryptsetup token import "$cryptdev" --json-file "$workdir"/token.json
+
+    evict_luks_metadata "$cryptdev"
 }
 
 # Removes LUKS tokens for a given kernel release.
@@ -385,6 +444,7 @@ remove_luks_token() {
     for k in "${krel_token_ids[@]}"; do
         lc_crypt cryptsetup token remove "$cryptdev" --token-id "$k"
     done
+    evict_luks_metadata "$cryptdev"
 }
 
 # Given a working directory (or $PWD if empty), a path to a loader, and a
@@ -418,12 +478,17 @@ seal_and_create_token() {
     predict_future_pcrs "$workdir" --substitute-bsa-unix-path "$(efi_path_to_unix "$current_loader")=$loader"
     seal_data "$workdir" <$LUKS_KEY
     import_luks_token "$workdir" "$cryptdev" "$krel"
+
+    evict_efi_vars
+
+    return 0
 }
 
 update_efi_entries() {(
     set -e
 
     read_efi_vars
+    local changes=
 
     for lbn in emboot.efi emboot_old.efi; do
         oldIFS=$IFS; IFS=$'\t'; entry=( ${efi_apps[$(emboot_loader_path "$lbn" | tr a-z A-Z)]} ); IFS=$oldIFS
@@ -433,8 +498,11 @@ update_efi_entries() {(
             tag=$(echo -n "$lbn" | grep '_[^.]' | sed -e 's/^[^_]*_\([^.]\+\).*/\1/')
             echo "Creating EFI boot loader entry for $lbn${tag:+ with tag $tag}"
             create_emboot_efi_entry "$lbn" "$tag"
+            changes=1
         fi
     done
+
+    [ -z "$changes" ] || evict_efi_vars
 
     exit 0
 )}
@@ -444,6 +512,7 @@ update_efi_boot_order() {(
 
     if is_true "$UPDATE_BOOT_ORDER"; then
         read_efi_vars
+
         oldIFS=$IFS; IFS=$'\t'
         primary=( ${efi_apps[$(emboot_loader_path "emboot.efi" | tr a-z A-Z)]} )
         old=( ${efi_apps[$(emboot_loader_path "emboot_old.efi" | tr a-z A-Z)]} )
@@ -468,6 +537,8 @@ update_efi_boot_order() {(
         echo "Updating EFI boot order to ${new_boot_order[*]}"
         efibootmgr -o "${new_boot_order[*]}"
         OFS=$oldIFS
+
+        evict_efi_vars
     else
         verbose_do -l 1 echo "Updating EFI boot order disabled by config"
     fi
