@@ -53,7 +53,7 @@ set -e
 [[ $cmd != ./* ]] || APPDIR=.
 . "${APPDIR:-APPDIR-not-set}"/bash_functions
 
-(( EMBOOT_VERBOSE += verbose_add ))
+EMBOOT_VERBOSE=$(( EMBOOT_VERBOSE + verbose_add ))
 
 do_or_show() {
     if [ -n "$no_act" ]; then
