@@ -94,9 +94,9 @@ compare_versions() {
     done
 
     # Fewer elements is earlier
-    if (( ${#a[@]} < ${#b[@]} )); then
+    if ((${#a[@]} < ${#b[@]})); then
         return 1
-    elif (( ${#a[@]} > ${#b[@]} )); then
+    elif ((${#a[@]} > ${#b[@]})); then
         return 3
     fi
 
@@ -112,39 +112,39 @@ qsort() {
     declare -n aref=$aname
     local compare=$2
     local start=${3:-0}
-    local end=${4:-$(( ${#aref[@]} - 1 ))}
+    local end=${4:-$((${#aref[@]} - 1))}
 
     # Algorithm based on Hoare partitioning pseudocode at
     # https://en.wikipedia.org/wiki/Quicksort
-    if (( start >= end )); then
+    if ((start >= end)); then
         return
     fi
     local pivot=${aref[$start]}
-    local i=$(( start - 1 ))
-    local j=$(( end + 1 ))
+    local i=$((start - 1))
+    local j=$((end + 1))
     local cmpi cmpj
     while true; do
-        (( i++ ))
+        ((i++))
         $compare "${aref[$i]}" "$pivot"
         cmpi=$?
-        while (( cmpi < 2 )); do
-            (( i++ ))
+        while ((cmpi < 2)); do
+            ((i++))
             $compare "${aref[$i]}" "$pivot"
             cmpi=$?
         done
-        if (( cmpi == 4 )); then return 4; fi
+        if ((cmpi == 4)); then return 4; fi
 
-        (( j-- ))
+        ((j--))
         $compare "${aref[$j]}" "$pivot"
         cmpj=$?
-        while (( cmpj > 2 && cmpj != 4 )); do
-            (( j-- ))
+        while ((cmpj > 2 && cmpj != 4)); do
+            ((j--))
             $compare "${aref[$j]}" "$pivot"
             cmpj=$?
         done
-        if (( cmpi == 4 )); then return 4; fi
+        if ((cmpi == 4)); then return 4; fi
 
-        if (( i >= j )); then
+        if ((i >= j)); then
             break
         fi
 
@@ -153,7 +153,7 @@ qsort() {
         aref[$j]=$swap
     done
     qsort "$aname" "$compare" $start $j
-    qsort "$aname" "$compare" $(( j + 1 )) $end
+    qsort "$aname" "$compare" $((j + 1)) $end
 }
 
 # Provisions the monotonic counter used to prevent downgrade attacks, unless
@@ -187,7 +187,7 @@ device_to_disk_and_partition() {
     local dev=$1
     local devpartuuid=$(lsblk -n -o PARTUUID -r "$dev" | tr a-z A-Z)
     local parents=( $(lsblk -s -n -o NAME -r "$dev" | tail -n +2) )
-    if (( ${#parents[@]} != 1 )); then
+    if ((${#parents[@]} != 1)); then
         echo "Do not know how to handle $dev with other than one parent: ${parents[*]}" >&2
         return 1
     fi
@@ -212,7 +212,7 @@ get_crypttab_entry() {(
     local OLDIFS=$IFS
     local IFS=$'\n'
     local crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep 'UUID=\('"$(any_of_bre "${parentdevices[@]}")"'\)' || true) )
-    if (( ${#parentdevices[@]} == 0 || ${#crypttabentries[@]} == 0 )); then
+    if ((${#parentdevices[@]} == 0 || ${#crypttabentries[@]} == 0)); then
         echo 'crypttab entry not found via UUID; trying node' >&2
         IFS=$OLDIFS
         local parentdevices=( $(lsblk -p -s -t $devnode -o NAME -n -r | grep '.' | sort | uniq) )
@@ -220,11 +220,11 @@ get_crypttab_entry() {(
         crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep "$(any_of_bre "${parentdevices[@]}")" || true) )
     fi
     IFS=$OLDIFS
-    if (( ${#parentdevices[@]} == 0 || ${#crypttabentries[@]} == 0 )); then
+    if ((${#parentdevices[@]} == 0 || ${#crypttabentries[@]} == 0)); then
         echo 'crypttab entry not found' >&2
         exit 1
     fi
-    if (( ${#crypttabentries[@]} > 1 )); then
+    if ((${#crypttabentries[@]} > 1)); then
         echo 'Filesystem in multiple crypttab entries unsupported' >&2
         IFS=$'\n'; printf %s\\n "${crypttabentries[*]}"
         exit 1
@@ -243,7 +243,7 @@ get_device_info() {(
 
     local mount_point=$(stat -c '%m' $trace_path)
     local dev=( $(lsblk -n -o UUID,PATH,MOUNTPOINT -r | awk '$3 == "'"$mount_point"'" { print $1 " " $2; }') )
-    if (( ${#dev[@]} == 0 )); then
+    if ((${#dev[@]} == 0)); then
         echo "No block device found with mount point $mount_point" >&2
         exit 1
     fi
@@ -265,14 +265,14 @@ list_installed_kernels() {(
         # Strip the trailing -<arch> because by semver rules it would cause the
         # numeric Debian revision to be compared as a string.
         vers=( "${vers[@]%%-[^/0-9.-]*}" )
-        if (( ${#vers[@]} != 2 )); then return 4; fi
+        if ((${#vers[@]} != 2)); then return 4; fi
         compare_versions "${vers[@]}"
         local rc=$?
-        return $(( 4-rc ))
+        return $((4-rc))
     }
 
     qsort kvers kver_descending
-    if (( $? == 4 )); then return 1; fi
+    if (($? == 4)); then return 1; fi
 
     local IFS=" "
     printf %s "${kvers[*]}"
@@ -374,7 +374,7 @@ get_emboot_key_slot() {
     read_luks_metadata "$cryptdev"
     local emboot_token_ids=( $(list_luks_token_ids "$cryptdev") )
     local first_keyslot
-    if (( ${#emboot_token_ids[@]} > 0 )); then
+    if ((${#emboot_token_ids[@]} > 0)); then
         local one_token_id=${emboot_token_ids[0]}
         first_keyslot=$(printf "%s" "${luksmd[$cryptdev]}" | lc_misc jq -j '.tokens."'"$one_token_id"'".keyslots | first')
         if [ -n "$first_keyslot" -a "$first_keyslot" != "null" ]; then
@@ -668,7 +668,17 @@ update_tokens() {(
                 if [ -n "$all_kernels" -o "$krel" = "$loader_krel" -o ${#token_ids} -eq 0 ]; then
                     echo "Creating token for EFI loader $loader for $loader_krel"
                     # Read the counter once for all subsequent seal operations
-                    [ -e "$tmpdir"/counter ] || read_counter "$tmpdir"/counter
+                    [ -e "$tmpdir"/counter ] || {
+                        read_counter "$tmpdir"/counter;
+                        if ((EMBOOT_ADD_TO_COUNTER != 0)); then
+                            cat "$tmpdir"/counter | xxd -p -c9999;
+                            ((curctr=0x$(xxd -p -c9999 <$tmpdir/counter) ));
+                            ((sealctr=curctr+$EMBOOT_ADD_TO_COUNTER));
+                            printf "%016x" $((sealctr)) | xxd -r -p -c9999 >$tmpdir/counter;
+                            printf "Using monotonic counter value %d (=%d+%d)\n" $((sealctr)) $((curctr)) "$EMBOOT_ADD_TO_COUNTER";
+                            cat "$tmpdir"/counter | xxd -p -c9999;
+                        fi;
+                    }
                     seal_and_create_token "$tmpdir" "${cryptdev[1]}" "$loader" "$loader_krel"
                 else
                     verbose_do -l 1 echo "Preserving existing token for EFI loader $loader for $loader_krel"

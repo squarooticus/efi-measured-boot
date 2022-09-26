@@ -11,17 +11,19 @@ seal_only=
 no_seal=
 no_act=
 force=
-verbose_add=0
-while getopts 'ik:rsSnfvh' opt; do
+((verbose_add=0))
+((add_to_counter=0))
+while getopts 'rsSik:fI:nvh' opt; do
     case "$opt" in
-        i) inc_counter=1 ;;
-        k) krel=$OPTARG ;;
         r) remove=1 ;;
         s) seal_only=1 ;;
         S) no_seal=1 ;;
-        n) no_act=1 ;;
+        i) inc_counter=1 ;;
+        k) krel=$OPTARG ;;
         f) force=1 ;;
-        v) (( verbose_add++ )) ;;
+        I) ((add_to_counter=$OPTARG));;
+        n) no_act=1 ;;
+        v) ((verbose_add++));;
         h)
             cat <<EOF
 syntax: $(basename $0) <options>
@@ -32,11 +34,14 @@ operations: (default is to update loaders and seal)
   -S                   Do not seal/create tokens: update loaders only
   -h                   Help
 
-parameters:
+modifiers:
   -i                   Increment monotonic counter before sealing
   -k <kernel release>  Apply operation to given kernel release only
-  -n                   No act: print command lines
+
+debug/dev:
   -f                   Force: skip checks
+  -I <delta>           Add given value to the monotonic counter when sealing
+  -n                   No act: print command lines
   -v                   Increase verbosity
 EOF
             exit 0
@@ -53,7 +58,8 @@ set -e
 [[ $cmd != ./* ]] || APPDIR=.
 . "${APPDIR:-APPDIR-not-set}"/bash_functions
 
-EMBOOT_VERBOSE=$(( EMBOOT_VERBOSE + verbose_add ))
+EMBOOT_VERBOSE=$((EMBOOT_VERBOSE + verbose_add))
+EMBOOT_ADD_TO_COUNTER=$((EMBOOT_ADD_TO_COUNTER + add_to_counter))
 
 do_or_show() {
     if [ -n "$no_act" ]; then
@@ -83,6 +89,7 @@ else
     fi
 
     if [ -n "$inc_counter" ]; then
+        echo "Incrementing monotonic counter"
         do_or_show increment_counter
     fi
 

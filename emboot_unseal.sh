@@ -38,7 +38,7 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
 
     tmpdir=$(setup_tmp_dir)
 
-    verbose_do eval 'read_pcrs "$tmpdir"/current_pcrs.txt'
+    verbose_do eval 'read_pcrs >$tmpdir/current_pcrs.txt'
     verbose_do eval 'read_counter "$tmpdir"/current_counter'
 
     krel=$(uname -r)

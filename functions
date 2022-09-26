@@ -1,8 +1,9 @@
 #! /bin/sh
 
 EMBOOT_VERBOSE=${EMBOOT_VERBOSE:-${VERBOSE:-0}}
+EMBOOT_ADD_TO_COUNTER=0
 
-export EMBOOT_VERBOSE
+export EMBOOT_VERBOSE EMBOOT_ADD_TO_COUNTER
 
 # Sets up a temporary working directory in the standard way
 setup_tmp_dir() {
@@ -165,7 +166,7 @@ LL_EFI=3
 LL_MISC=4
 
 lc_tpm() {
-    if ! is_verbose $LL_TPM_DEBUG && [ -z "${1##tpm2_*}" -a "$1" != "tpm2_nvreadpublic" ]; then
+    if ! is_verbose $LL_TPM_DEBUG && [ -z "${1##tpm2_*}" -a "$1" != "tpm2_nvreadpublic" -a "$1" != "tpm2_pcrread" ]; then
         local cmd=$1
         shift
         set -- "$cmd" -Q "$@"
@@ -344,8 +345,7 @@ read_counter() {
 
 # Writes the configured PCRs to the argument filename
 read_pcrs() {
-    [ -n "$1" ] || return 1
-    lc_tpm tpm2_pcrread ${1:+-Q} sha256:"$SEAL_PCRS" -o "$1"
+    lc_tpm tpm2_pcrread ${1:+-Q} sha256:"$SEAL_PCRS" ${1:+-o "$1"}
 }
 
 # Writes future PCR predictions to the argument filename, passing the remaining
