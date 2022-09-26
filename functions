@@ -411,13 +411,16 @@ seal_data() {(
     # tpm2_create. This is also the reason for the subshell: so we don't
     # accidentally clobber the caller's stdin on early exit.
     exec 3<&0 </dev/null
-    trap 'lc_tpm tpm2_flushcontext -Q -t' EXIT
+    trap 'rc=$?; trap - EXIT; lc_tpm tpm2_flushcontext -Q -t; lc_tpm tpm2_flushcontext -Q -s; exit $rc' EXIT
     rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
-    lc_tpm tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$workdir"/provision.ctx && \
-        lc_tpm tpm2_startauthsession -Q -S "$workdir"/session.ctx && \
-        lc_tpm tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
-        lc_tpm tpm2_policynv -Q -S "$workdir"/session.ctx -C o -i "$workdir"/counter -L "$workdir"/policy "$COUNTER_HANDLE" ule && \
-        lc_tpm tpm2_create -Q -C "$workdir"/provision.ctx -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - -L "$workdir"/policy -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub <&3 3<&-
+    local pctx="$workdir"/pctx.ctx
+    local sctx="$workdir"/session.ctx
+    local policy="$workdir"/policy
+    lc_tpm tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$pctx" && \
+        lc_tpm tpm2_startauthsession -Q -S "$sctx" && \
+        lc_tpm tpm2_policypcr -Q -S "$sctx" -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
+        lc_tpm tpm2_policynv -Q -S "$sctx" -C o -i "$workdir"/counter -L "$policy" "$COUNTER_HANDLE" ule && \
+        lc_tpm tpm2_create -Q -C "$pctx" -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - -L "$policy" -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub <&3 3<&-
 )}
 
 # Attempts to unseal the sealed data (sealed.{priv,pub}) from the given working
@@ -428,17 +431,19 @@ seal_data() {(
 # by the TPM.
 unseal_data() {(
     local workdir=${1:-.}
-    trap 'lc_tpm tpm2_flushcontext -Q -t' EXIT
+    trap 'rc=$?; trap - EXIT; lc_tpm tpm2_flushcontext -Q -t; lc_tpm tpm2_flushcontext -Q -s; exit $rc' EXIT
     if [ ! -r "$workdir"/pcrs ]; then
         read_pcrs "$workdir"/pcrs || return 1
     fi
     if [ ! -r "$workdir"/counter ]; then
         read_counter >"$workdir"/counter || return 1
     fi
-    lc_tpm tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$workdir"/provision.ctx && \
-        lc_tpm tpm2_load -Q -C "$workdir"/provision.ctx -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub -c "$workdir"/load.ctx && \
-        lc_tpm tpm2_startauthsession -Q -S "$workdir"/session.ctx --policy-session && \
-        lc_tpm tpm2_policypcr -Q -S "$workdir"/session.ctx -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
-        lc_tpm tpm2_policynv -Q -C o -S "$workdir"/session.ctx -i "$workdir"/counter "$COUNTER_HANDLE" ule && \
-        lc_tpm tpm2_unseal -Q -c "$workdir"/load.ctx -p session:"$workdir"/session.ctx
+    local pctx="$workdir"/pctx.ctx
+    local sctx="$workdir"/session.ctx
+    lc_tpm tpm2_createprimary -Q -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$pctx" && \
+        lc_tpm tpm2_load -Q -C "$pctx" -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub -c "$workdir"/load.ctx && \
+        lc_tpm tpm2_startauthsession -Q -S "$sctx" --policy-session && \
+        lc_tpm tpm2_policypcr -Q -S "$sctx" -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
+        lc_tpm tpm2_policynv -Q -C o -S "$sctx" -i "$workdir"/counter "$COUNTER_HANDLE" ule && \
+        lc_tpm tpm2_unseal -Q -c "$workdir"/load.ctx -p session:"$sctx"
 )}

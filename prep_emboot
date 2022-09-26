@@ -85,7 +85,7 @@ revert_changes() {
     rm -f "$cfgfile.new"
 }
 
-trap 'rc=$?; [ "$rc" -eq 0 ] && exit 0; revert_changes' EXIT
+trap 'rc=$?; trap - EXIT; [ "$rc" -eq 0 ] && exit 0; revert_changes' EXIT
 
 # Write config
 mkdir -p "$CONFIGDIR"

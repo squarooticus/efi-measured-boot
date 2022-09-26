@@ -22,7 +22,7 @@ revert_changes() {
     fi
 }
 
-trap 'rc=$?; [ "$rc" -eq 0 ] && exit 0; revert_changes' EXIT
+trap 'rc=$?; trap - EXIT; [ "$rc" -eq 0 ] && exit 0; revert_changes' EXIT
 
 # Create a new key and add it to the LUKS header of the root partition
 mkdir -m 0700 -p $(dirname "$LUKS_KEY")

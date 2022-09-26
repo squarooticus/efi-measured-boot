@@ -16,7 +16,7 @@ fallback() {
     exec "$keyscript" "$keyscriptarg" >&3 3>&-
 }
 
-trap 'rc=$?; [ -z "$UNSEAL_PAUSE" ] || sleep "$UNSEAL_PAUSE"; [ "$rc" -eq 0 ] && exit 0; fallback' EXIT
+trap 'rc=$?; trap - EXIT; [ -z "$UNSEAL_PAUSE" ] || sleep "$UNSEAL_PAUSE"; [ "$rc" -eq 0 ] && exit 0; fallback' EXIT
 
 set -e
 
