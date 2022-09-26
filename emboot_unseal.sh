@@ -12,11 +12,10 @@ tmpdir=
 fallback() {
     echo "$(basename "$cmd") failed with exit code $rc"
     echo "Falling back to passphrase entry"
-    test -n "$tmpdir" && rm -rf "$tmpdir"
     exec "$keyscript" "$keyscriptarg" >&3 3>&-
 }
 
-trap 'rc=$?; trap - EXIT; [ -z "$UNSEAL_PAUSE" ] || sleep "$UNSEAL_PAUSE"; [ "$rc" -eq 0 ] && exit 0; fallback' EXIT
+trap 'rc=$?; trap - EXIT; [ -z "$tmpdir" ] || rm -rf "$tmpdir"; [ -z "$UNSEAL_PAUSE" ] || sleep "$UNSEAL_PAUSE"; [ "$rc" -eq 0 ] && exit 0; fallback' EXIT
 
 set -e
 
@@ -33,14 +32,14 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
 
     . /etc/efi-measured-boot/config
     [ -n "${cmd##./*}" ] || APPDIR=.
-    . "${APPDIR:-.}"/functions
+    . "${APPDIR:-/APPDIR-not-set}"/functions
 
     if is_verbose 5; then set -x; fi
 
     tmpdir=$(setup_tmp_dir)
 
-    verbose_do eval 'read_pcrs >$tmpdir/current_pcrs.txt'
-    verbose_do eval 'read_counter >$tmpdir/current_counter'
+    verbose_do eval 'read_pcrs "$tmpdir"/current_pcrs.txt'
+    verbose_do eval 'read_counter "$tmpdir"/current_counter'
 
     krel=$(uname -r)
     for tid in $(list_luks_token_ids "$CRYPTTAB_SOURCE" "$krel"); do
@@ -53,7 +52,7 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
         outcome FAILED
 
         verbose_do eval 'printf "  counter: current=%d expects<=%d\n" "0x$(xxd -p -c9999 <$tmpdir/current_counter)" "0x$(xxd -p -c9999 <$tmpdir/counter)"'
-        verbose_do eval 'diff_pcrs $tmpdir/pcrs $tmpdir/current_pcrs.txt | sed -e "s/^/  /"'
+        verbose_do eval 'diff_pcrs "$tmpdir"/pcrs "$tmpdir"/current_pcrs.txt | sed -e "s/^/  /"'
     done
 
     rm -rf "$tmpdir"

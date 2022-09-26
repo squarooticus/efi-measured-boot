@@ -3,7 +3,7 @@
 SYSTEMD_STUB=/usr/lib/systemd/boot/efi/linuxx64.efi.stub
 CHECKS=( root arch no_separate_boot mounted_efi root_luks systemd_stub tpm tpm_futurepcr packages binaries cryptsetup_version )
 
-. ./functions
+APPDIR=.
 . ./bash_functions
 
 check_root() {

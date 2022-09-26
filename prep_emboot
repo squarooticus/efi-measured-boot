@@ -2,7 +2,9 @@
 
 exec 3>&1 >&2
 
-. ./functions
+set -e
+
+APPDIR=.
 . ./bash_functions
 
 remove_keyscript_option() {
@@ -32,8 +34,6 @@ OTHER_HOOKS_DIR=/etc/initramfs
 KERNEL_HOOKS_DIR=/etc/kernel
 APPDIR=/usr/local/share/efi-measured-boot
 BINDIR=/usr/local/sbin
-
-set -e
 
 . /etc/os-release
 OS_SHORT_NAME=$ID

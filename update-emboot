@@ -47,9 +47,11 @@ EOF
 done
 shift $((OPTIND-1))
 
-[ -r /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
+set -e
+
+. /etc/efi-measured-boot/config
 [[ $cmd != ./* ]] || APPDIR=.
-. "${APPDIR:-.}"/bash_functions || exit 1
+. "${APPDIR:-APPDIR-not-set}"/bash_functions
 
 (( EMBOOT_VERBOSE += verbose_add ))
 
@@ -61,8 +63,6 @@ do_or_show() {
         "$@"
     fi
 }
-
-set -e
 
 if [ -n "$remove" ]; then
     [ -n "$force" -o -n "$krel" ] || { echo "-r requires -k to be specified"; exit 1; }

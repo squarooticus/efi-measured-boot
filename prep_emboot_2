@@ -2,11 +2,10 @@
 
 exec 3>&1 >&2
 
-. /etc/efi-measured-boot/config
-. ./functions
-. ./bash_functions
-
 set -e
+
+. /etc/efi-measured-boot/config
+. "${APPDIR}"/bash_functions
 
 provision_counter
 

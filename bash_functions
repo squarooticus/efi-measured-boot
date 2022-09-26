@@ -1,10 +1,6 @@
 #! /bin/bash
 
-if [ -r "${APPDIR:-.}"/functions ]; then
-    . "${APPDIR:-.}"/functions
-else
-    . "$(dirname $0)"/functions || exit 1
-fi
+. "${APPDIR:-/APPDIR-not-set}"/functions
 
 # Shell quotes with an attempt to make the result human-readable.
 quote_args() {
@@ -164,7 +160,7 @@ qsort() {
 # one with the correct properties already exists. Errors if the NV handle is in
 # use with conflicting properties.
 provision_counter() {
-    if lc_tpm tpm2_nvreadpublic -Q "$COUNTER_HANDLE" 2>/dev/null; then
+    if lc_tpm tpm2_nvreadpublic "$COUNTER_HANDLE"; then
         eval "$(lc_tpm tpm2_nvreadpublic "$COUNTER_HANDLE" | parse_yaml '' nvmd_)"
         invar=nvmd_$(printf "0x%x" $COUNTER_HANDLE)_attributes_value
         if [ -z "${!invar}" ]; then
@@ -208,7 +204,6 @@ device_to_disk_and_partition() {
 # Given a device node, output the unique entry from /etc/crypttab covering that
 # device (e.g., containing that partition or LVM logical volume or whatever).
 get_crypttab_entry() {(
-    local cmd=$0
     local devnode=$1
 
     set -e
@@ -242,7 +237,6 @@ get_crypttab_entry() {(
 
 # Given a path, output `UUID device_node_path` for the containing filesystem.
 get_device_info() {(
-    local cmd=$0
     local trace_path=${1:-/}
 
     set -e
@@ -426,7 +420,7 @@ import_luks_token() {
         echo "No key slots on $cryptdev matching $LUKS_KEY" >&2
         return 1
     }
-    lc_misc jq --null-input "${args[@]}" --arg krel "$krel" --arg keyslot "$keyslot" --arg updated "$(date +%s)" '{ "type": "emboot", "keyslots": [ $keyslot ], "krel": $krel, "updated": $updated'"$json"' }' >"$workdir"/token.json
+    lc_misc jq --null-input "${args[@]}" --arg krel "$krel" --arg keyslot "$keyslot" --arg updated "$(date +%s)" '{ "type": "emboot", "keyslots": [ $keyslot ], "krel": $krel, "updated": $updated'"$json"' }' >$workdir/token.json
     local current_token_ids=( $(list_luks_token_ids "$cryptdev" "$krel") )
     for k in "${current_token_ids[@]}"; do
         lc_crypt cryptsetup token remove "$cryptdev" --token-id "$k"
@@ -447,11 +441,12 @@ remove_luks_token() {
     evict_luks_metadata "$cryptdev"
 }
 
-# Given a working directory (or $PWD if empty), a path to a loader, and a
-# kernel release string (of the form returned by uname -r), seals the LUKS
-# passphrase to the loader by predicting future PCR values based on the UEFI
-# boot log for the current boot. Will bomb out if the system has not been
-# booted from either the primary or old emboot boot entry.
+# Given a working directory (or $PWD if empty) containing a monotonic counter
+# value `counter`; a path to a loader; and a kernel release string (of the form
+# returned by uname -r), seals the LUKS passphrase to the loader by predicting
+# future PCR values based on the UEFI boot log for the current boot. Will bomb
+# out if the system has not been booted from either the primary or old emboot
+# boot entry.
 seal_and_create_token() {
     local workdir=${1:-.}
     local cryptdev=$2
@@ -475,7 +470,7 @@ seal_and_create_token() {
         return 1
     fi
 
-    predict_future_pcrs "$workdir" --substitute-bsa-unix-path "$(efi_path_to_unix "$current_loader")=$loader"
+    predict_future_pcrs "$workdir"/pcrs --substitute-bsa-unix-path "$(efi_path_to_unix "$current_loader")=$loader"
     seal_data "$workdir" <$LUKS_KEY
     import_luks_token "$workdir" "$cryptdev" "$krel"
 
@@ -561,13 +556,15 @@ install_loaders() {(
     done
     shift $((OPTIND-1))
 
-    tmpdir=$(setup_tmp_dir)
-
     cleanup() {
+        rc=$?
         [ -n "$tmpdir" ] && rm -rf "$tmpdir"
+        exit $rc
     }
 
     trap cleanup EXIT
+
+    tmpdir=$(setup_tmp_dir)
 
     rootdev=( $(get_device_info /) )
     cryptdev=( $(get_crypttab_entry "${rootdev[1]}") )
@@ -582,7 +579,7 @@ install_loaders() {(
         exit 1
     fi
 
-    echo "root=UUID=${rootdev[0]} cryptdevice=${cryptdev[1]}:${cryptdev[0]} $KERNEL_PARAMS" >"$tmpdir"/kcli.txt
+    echo "root=UUID=${rootdev[0]} cryptdevice=${cryptdev[1]}:${cryptdev[0]} $KERNEL_PARAMS" >$tmpdir/kcli.txt
 
     kernels=( $(list_installed_kernels) )
 
@@ -608,7 +605,7 @@ install_loaders() {(
                         echo "WARNING: primary emboot EFI entry is unbootable!"
                     fi
                 else
-                    printf "%s" "$loader_krel" >"$tmpdir"/krel.txt
+                    printf "%s" "$loader_krel" >$tmpdir/krel.txt
                     echo "Creating EFI loader $loader for $loader_krel"
                     create_loader "$kernel" "$initrd" "$tmpdir"/kcli.txt "$tmpdir"/krel.txt "$tmpdir"/linux.efi
                     lc_misc cp -f "$tmpdir"/linux.efi "$loader"
@@ -650,16 +647,12 @@ update_tokens() {(
     cleanup() {
         rc=$?
         [ -n "$tmpdir" ] && rm -rf "$tmpdir"
-        [ "$rc" -eq 0 ] && exit 0
-        echo "$(basename "$cmd") failed with exit code $rc"
         exit $rc
     }
 
     trap cleanup EXIT
 
     tmpdir=$(setup_tmp_dir)
-
-    read_counter >"$tmpdir"/counter
 
     read_efi_vars
 
@@ -674,6 +667,8 @@ update_tokens() {(
                 token_ids=( $(list_luks_token_ids "${cryptdev[1]}" "$loader_krel") )
                 if [ -n "$all_kernels" -o "$krel" = "$loader_krel" -o ${#token_ids} -eq 0 ]; then
                     echo "Creating token for EFI loader $loader for $loader_krel"
+                    # Read the counter once for all subsequent seal operations
+                    [ -e "$tmpdir"/counter ] || read_counter "$tmpdir"/counter
                     seal_and_create_token "$tmpdir" "${cryptdev[1]}" "$loader" "$loader_krel"
                 else
                     verbose_do -l 1 echo "Preserving existing token for EFI loader $loader for $loader_krel"
