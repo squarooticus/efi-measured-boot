@@ -357,18 +357,58 @@ evict_luks_metadata() {
     fi
 }
 
-# Outputs a space-separated list of token IDs associated with emboot, and
-# kernel release (if specified). Bash version making use of associative array.
-list_luks_token_ids() {
-    local cryptdev=$1
-    local krel=$2
-    read_luks_metadata "$cryptdev"
-    printf "%s" "${luksmd[$cryptdev]:-$(lc_crypt cryptsetup luksDump "$cryptdev" --dump-json-metadata)}" | lc_misc jq -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'"${krel:+ and .\"value\".\"krel\" == \"$krel\"}"')) | map(.key) | sort | join(" ")'
+# Parses arguments for list_luks_token_ids, primarily to give calls that pass
+# through such arguments consistent access to `cryptdev`. This is the downside
+# of implementing the chosen abstraction in bash.
+parse_luks_token_args() {
+    local OPTIND
+    local OPTARG
+    # Initial : is for silent running
+    while getopts ':k:h:' opt; do
+        case "$opt" in
+            k) krel=$OPTARG ;;
+            h) loader_digest=$OPTARG ;;
+            ?) return 1;;
+        esac
+    done
+    shift $((OPTIND-1))
+    cryptdev=$1
+    [ -n "$cryptdev" ] || return 1
 }
 
-# Outputs the index of the emboot key slot. If there is an existing emboot
-# token, pulls this directly from it; if not, tests the key against all
-# keyslots until it finds a match.
+# Outputs a space-separated list of token IDs associated with emboot, limited
+# to the given kernel release or loader digest (if specified). Bash version
+# making use of associative array.
+list_luks_token_ids() {
+    local krel=
+    local loader_digest=
+    local cryptdev=
+    parse_luks_token_args "$@" || return 1
+    read_luks_metadata "$cryptdev"
+    printf "%s" "${luksmd[$cryptdev]}" | \
+        lc_misc jq \
+        ${krel:+--arg krel "$krel"} \
+        ${loader_digest:+--arg loader_digest "$loader_digest"} \
+        -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'${krel:+' and ."value"."krel" == $krel'}${loader_digest:+' and ."value"."loader_digest" == $loader_digest'}')) | map(.key) | sort | join(" ")'
+}
+
+# Removes whichever tokens are returned by passing arguments through to
+# list_luks_token_ids.
+remove_luks_tokens() {
+    local tids=( $(list_luks_token_ids "$@") )
+    local krel=
+    local loader_digest=
+    local cryptdev=
+    parse_luks_token_args "$@" || return 1
+    for i in "${tids[@]}"; do
+        lc_crypt cryptsetup token remove "$cryptdev" --token-id "$i"
+    done
+    evict_luks_metadata "$cryptdev"
+}
+
+# Outputs the index of the emboot key slot matching the passphrase file. If
+# there is an existing emboot token, tries that one first; if that fails, then
+# tests the key against all keyslots until it finds a match, if any.
 get_emboot_key_slot() {
     local cryptdev=$1
     read_luks_metadata "$cryptdev"
@@ -401,12 +441,15 @@ get_emboot_key_slot() {
     return 1
 }
 
-# Composes JSON for sealed key data in the working directory and imports it as
-# a new LUKS token.
+# Takes a working directory, crypto backing device, kernel release, and sha256
+# of loader image. Composes JSON for sealed data (sealed.{priv,pub}) and
+# associated platform state (PCRs `pcrs` and monotonic counter value `counter`)
+# in the working directory and imports it as a new LUKS token.
 import_luks_token() {
     local workdir=${1:-.}
     local cryptdev=$2
     local krel=$3
+    local loader_digest=$4
     declare -a args
     local json=
     local k
@@ -420,24 +463,16 @@ import_luks_token() {
         echo "No key slots on $cryptdev matching $LUKS_KEY" >&2
         return 1
     }
-    lc_misc jq --null-input "${args[@]}" --arg krel "$krel" --arg keyslot "$keyslot" --arg updated "$(date +%s)" '{ "type": "emboot", "keyslots": [ $keyslot ], "krel": $krel, "updated": $updated'"$json"' }' >$workdir/token.json
-    local current_token_ids=( $(list_luks_token_ids "$cryptdev" "$krel") )
-    for k in "${current_token_ids[@]}"; do
-        lc_crypt cryptsetup token remove "$cryptdev" --token-id "$k"
-    done
+    lc_misc jq --null-input \
+        "${args[@]}" --arg krel "$krel" --arg loader_digest "$loader_digest" \
+        --arg keyslot "$keyslot" --arg updated "$(date +%s)" \
+        '{ "type": "emboot", "keyslots": [ $keyslot ], "krel": $krel, "loader_digest": $loader_digest, "updated": $updated'"$json"' }' >$workdir/token.json
+    #local current_token_ids=( $(list_luks_token_ids -k "$krel" "$cryptdev") )
+    #for k in "${current_token_ids[@]}"; do
+    #    lc_crypt cryptsetup token remove "$cryptdev" --token-id "$k"
+    #done
     lc_crypt cryptsetup token import "$cryptdev" --json-file "$workdir"/token.json
 
-    evict_luks_metadata "$cryptdev"
-}
-
-# Removes LUKS tokens for a given kernel release.
-remove_luks_token() {
-    local cryptdev=$1
-    local krel=$2
-    local krel_token_ids=( $(list_luks_token_ids "$cryptdev" "$krel") )
-    for k in "${krel_token_ids[@]}"; do
-        lc_crypt cryptsetup token remove "$cryptdev" --token-id "$k"
-    done
     evict_luks_metadata "$cryptdev"
 }
 
@@ -472,13 +507,15 @@ seal_and_create_token() {
 
     predict_future_pcrs "$workdir"/pcrs --substitute-bsa-unix-path "$(efi_path_to_unix "$current_loader")=$loader"
     seal_data "$workdir" <$LUKS_KEY
-    import_luks_token "$workdir" "$cryptdev" "$krel"
+    import_luks_token "$workdir" "$cryptdev" "$krel" "sha256:$(sha256sum "$loader" | awk '{print $1;}')"
 
     evict_efi_vars
 
     return 0
 }
 
+# Top-level command that adds EFI boot entries for emboot loaders if they don't
+# exist.
 update_efi_entries() {(
     set -e
 
@@ -502,6 +539,9 @@ update_efi_entries() {(
     exit 0
 )}
 
+# Top-level command that puts the two emboot EFI boot entries at the beginning
+# of the boot order if they aren't already there and if configured to update
+# the boot order.
 update_efi_boot_order() {(
     set -e
 
@@ -541,6 +581,8 @@ update_efi_boot_order() {(
     exit 0
 )}
 
+# Top-level command to build install the emboot loaders in the EFI system
+# partition. Does not seal or alter existing tokens.
 install_loaders() {(
     set -e
 
@@ -609,8 +651,8 @@ install_loaders() {(
                     echo "Creating EFI loader $loader for $loader_krel"
                     create_loader "$kernel" "$initrd" "$tmpdir"/kcli.txt "$tmpdir"/krel.txt "$tmpdir"/linux.efi
                     lc_misc cp -f "$tmpdir"/linux.efi "$loader"
-                    verbose_do -l 1 echo "Removing any existing tokens for $loader_krel"
-                    remove_luks_token "${cryptdev[1]}" "$loader_krel"
+                    #verbose_do -l 1 echo "Removing any existing tokens for $loader_krel"
+                    #remove_luks_tokens "${cryptdev[1]}" "$loader_krel"
                 fi
             else
                 verbose_do -l 1 echo "Skipping creation of EFI loader $loader for $loader_krel"
@@ -627,6 +669,15 @@ install_loaders() {(
     exit 0
 )}
 
+# Top-level command to update tokens for the installed loaders. Default
+# behavior is to add tokens for any loader without a (presumed-)valid token,
+# i.e., mismatching loader_digest or obsolete monotonic counter value. Takes
+# the following arguments:
+#
+# -a         Refresh tokens for both loaders
+#
+# -k <krel>  Refresh token for whichever loader (if any) matches the given
+#            kernel release
 update_tokens() {(
     set -e
 
@@ -664,7 +715,7 @@ update_tokens() {(
         if [ -e "$loader" ]; then
             loader_krel=$(extract_krel_from_loader "$tmpdir" "$loader")
             if [ -n "$loader_krel" ]; then
-                token_ids=( $(list_luks_token_ids "${cryptdev[1]}" "$loader_krel") )
+                token_ids=( $(list_luks_token_ids -k "$loader_krel" "${cryptdev[1]}") )
                 if [ -n "$all_kernels" -o "$krel" = "$loader_krel" -o ${#token_ids} -eq 0 ]; then
                     echo "Creating token for EFI loader $loader for $loader_krel"
                     # Read the counter once for all subsequent seal operations

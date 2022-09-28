@@ -392,9 +392,22 @@ diff_pcrs() {
 # Outputs a space-separated list of token IDs associated with emboot, and
 # kernel release (if specified)
 list_luks_token_ids() {
+    local OPTIND
+    local OPTARG
+    local krel=
+    # Initial : is for silent running
+    while getopts ':k:' opt; do
+        case "$opt" in
+            k) krel=$OPTARG ;;
+            ?) return 1;;
+        esac
+    done
+    shift $((OPTIND-1))
     local cryptdev=$1
-    local krel=$2
-    lc_crypt cryptsetup luksDump "$cryptdev" --dump-json-metadata | lc_misc jq -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'"${krel:+ and .\"value\".\"krel\" == \"$krel\"}"')) | map(.key) | join(" ")'
+    lc_crypt cryptsetup luksDump "$cryptdev" --dump-json-metadata | \
+        lc_misc jq \
+        ${krel:+--arg krel "$krel"} \
+        -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'${krel:+' and ."value"."krel" == $krel'}')) | map(.key) | sort | join(" ")'
 }
 
 # Outputs the expected platform state and sealed data from a given token ID
@@ -403,7 +416,7 @@ export_luks_token() {
     local workdir=${1:-.}
     local cryptdev=$2
     local token_id=$3
-    md=$(lc_crypt cryptsetup token export "$cryptdev" --token-id "$token_id" 2>/dev/null)
+    local md=$(lc_crypt cryptsetup token export "$cryptdev" --token-id "$token_id" 2>/dev/null)
     if [ -z "$md" ]; then
         return 1
     fi

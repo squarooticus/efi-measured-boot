@@ -42,7 +42,7 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
     verbose_do eval 'read_counter "$tmpdir"/current_counter'
 
     krel=$(uname -r)
-    for tid in $(list_luks_token_ids "$CRYPTTAB_SOURCE" "$krel"); do
+    for tid in $(list_luks_token_ids -k "$krel" "$CRYPTTAB_SOURCE"); do
         export_luks_token "$tmpdir" "$CRYPTTAB_SOURCE" "$tid"
 
         if unseal_data "$tmpdir" >&3 3>&-; then
