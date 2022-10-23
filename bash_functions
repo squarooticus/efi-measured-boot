@@ -166,8 +166,8 @@ provision_counter() {
         if [ -z "${!invar}" ]; then
             echo "Cannot parse attributes for NV index $COUNTER_HANDLE" >&2
             return 1
-        elif [[ ${!invar} != "0x12000222" ]]; then
-            echo "Conflicting counter with invalid attributes at NV index $COUNTER_HANDLE" >&2
+        elif [[ ${!invar} != "0x22020012" ]]; then
+            echo "Conflicting counter with invalid attributes at NV index $COUNTER_HANDLE (value=${!invar})" >&2
             return 1
         fi
         echo "Using existing counter at NV index $COUNTER_HANDLE" >&2
