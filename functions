@@ -317,7 +317,7 @@ create_loader() {
         --add-section .krel="$krel" --change-section-vma .krel=0x40000 \
         --add-section .linux="$kernel" --change-section-vma .linux=0x2000000 \
         --add-section .initrd="$initrd" --change-section-vma .initrd=0x3000000 \
-        /usr/lib/systemd/boot/efi/linuxx64.efi.stub "$output"
+        ${EFI_STUB:-/usr/lib/systemd/boot/efi/linuxx64.efi.stub} "$output"
 }
 
 extract_krel_from_loader() {
@@ -354,7 +354,7 @@ predict_future_pcrs() {
     local outf=$1
     [ -n "$outf" ] || return 1
     shift
-    lc_tpm tpm_futurepcr --allow-unexpected-bsa -L "$SEAL_PCRS" -H sha256 "$@" -o "$outf"
+    lc_tpm tpm_futurepcr -L "$SEAL_PCRS" -H sha256 "$@" -o "$outf"
 }
 
 # Splits a string into multiple newline-separated strings of at most the given
