@@ -17,8 +17,6 @@ fallback() {
 
 trap 'rc=$?; trap - EXIT; [ -z "$tmpdir" ] || rm -rf "$tmpdir"; [ -z "$UNSEAL_PAUSE" ] || sleep "$UNSEAL_PAUSE"; [ "$rc" -eq 0 ] && exit 0; fallback' EXIT
 
-set -e
-
 if [ "$CRYPTTAB_TRIED" = 0 ]; then
     outcome() {
         echo "EFI measured boot unseal $1"
@@ -28,6 +26,16 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
             echo "  token ID: $tid"
             echo "  kernel release: $krel"
         fi
+    }
+
+    kill_children() {
+        jobs -p >$tmpdir/children
+        children=$(cat $tmpdir/children)
+        if [ -n "$children" ]; then
+            verbose_do -l 1 echo "Killing child PIDs $children"
+            kill "$@" $children >/dev/null 2>&1
+        fi
+        return 0
     }
 
     . /etc/efi-measured-boot/config
@@ -55,8 +63,24 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
         verbose_do eval 'diff_pcrs "$tmpdir"/pcrs "$tmpdir"/current_pcrs.txt | sed -e "s/^/  /"'
     done
 
-    rm -rf "$tmpdir"
     echo "Falling back to passphrase entry"
+
+    if [ -n "$UNSEAL_FAILED_CMD" ]; then
+        verbose_do -l 1 echo "Running unseal failed command: $UNSEAL_FAILED_CMD"
+        eval "$UNSEAL_FAILED_CMD"
+        jobs
+
+        "$keyscript" "$keyscriptarg" >&3 3>&-
+        rc=$?
+
+        kill_children; sleep 1; kill_children -9
+        rm -rf "$tmpdir"
+
+        trap - EXIT
+        exit $rc
+    fi
+
+    rm -rf "$tmpdir"
 fi
 
 exec "$keyscript" "$keyscriptarg" >&3 3>&-
