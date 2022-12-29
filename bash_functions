@@ -256,9 +256,8 @@ get_device_info() {(
 # Output a space-separated list of kernel images in /boot in reverse order
 # (highest first).
 list_installed_kernels() {(
-    declare -a kvers
     shopt -s nullglob
-    local kvers=( /boot/vmlinuz* )
+    declare -a kvers=( /boot/vmlinuz* )
 
     set +e
 
@@ -269,7 +268,7 @@ list_installed_kernels() {(
         vers=( "${vers[@]%%-[^/0-9.-]*}" )
         if ((${#vers[@]} != 2)); then return 4; fi
         compare_versions "${vers[@]}"
-        local rc=$?
+        declare -i rc=$?
         return $((4-rc))
     }
 
@@ -306,13 +305,11 @@ read_efi_vars() {
         done < <(lc_efi efibootmgr -v | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-fA-F-]\+\),.*File(\([^)]\+\)).*/\4\t\1\t\2\t\3/')
 
         local IFS=','
-        declare -ga efi_boot_order
-        efi_boot_order=( $(efibootmgr -v | grep '^BootOrder' | sed -e 's/^BootOrder: *//') )
+        declare -ga efi_boot_order=( $(efibootmgr -v | grep '^BootOrder' | sed -e 's/^BootOrder: *//') )
         local IFS=$oldIFS
         verbose_do -l $LL_EFI eval 'printf "  EFI boot order: ${efi_boot_order[*]}\n" >&2'
 
-        declare -g efi_boot_current
-        efi_boot_current=$(efibootmgr -v | grep '^BootCurrent' | sed -e 's/^BootCurrent: *//')
+        declare -g efi_boot_current=$(efibootmgr -v | grep '^BootCurrent' | sed -e 's/^BootCurrent: *//')
         verbose_do -l $LL_EFI eval 'printf "  EFI boot current: %s\n" "$efi_boot_current" >&2'
 
         declare -g efi_vars_available=1
