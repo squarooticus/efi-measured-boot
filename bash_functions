@@ -162,12 +162,14 @@ qsort() {
 provision_counter() {
     if lc_tpm tpm2_nvreadpublic "$COUNTER_HANDLE"; then
         eval "$(lc_tpm tpm2_nvreadpublic "$COUNTER_HANDLE" | parse_yaml '' nvmd_)"
-        invar=nvmd_$(printf "0x%x" $COUNTER_HANDLE)_attributes_value
+        local invar=nvmd_$(printf "0x%x" $COUNTER_HANDLE)_attributes_value
         if [ -z "${!invar}" ]; then
             echo "Cannot parse attributes for NV index $COUNTER_HANDLE" >&2
             return 1
-        elif [[ ${!invar} != "0x22020012" ]]; then
-            echo "Conflicting counter with invalid attributes at NV index $COUNTER_HANDLE (value=${!invar})" >&2
+        fi
+        declare -i attrs=${!invar}
+        if (( (attrs & 0x20200f2) != 0x2020012 )); then
+            echo "Conflicting counter with invalid attributes at NV index $COUNTER_HANDLE (value=$attrs)" >&2
             return 1
         fi
         echo "Using existing counter at NV index $COUNTER_HANDLE" >&2
