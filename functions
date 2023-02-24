@@ -354,7 +354,7 @@ predict_future_pcrs() {
     local outf=$1
     [ -n "$outf" ] || return 1
     shift
-    lc_tpm tpm_futurepcr -L "$SEAL_PCRS" -H sha256 "$@" -o "$outf"
+    lc_tpm /root/.local/bin/tpm_futurepcr -L "$SEAL_PCRS" -H sha256 "$@" -o "$outf"
 }
 
 # Splits a string into multiple newline-separated strings of at most the given
