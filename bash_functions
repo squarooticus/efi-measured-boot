@@ -472,7 +472,7 @@ seal_and_create_token() {
         return 1
     fi
 
-    predict_future_pcrs "$workdir"/pcrs --substitute-bsa-unix-path "$(efi_path_to_unix "$current_loader")=$loader"
+    predict_future_pcrs "$workdir"/pcrs --stop-event bsa-path="${current_loader//\\//}" 4 bsa "$loader"
     seal_data "$workdir" <$LUKS_KEY
     import_luks_token "$workdir" "$cryptdev" "$krel"
 

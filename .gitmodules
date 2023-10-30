@@ -1,5 +1,3 @@
-[submodule "tpm_futurepcr"]
-	path = tpm_futurepcr
-	url = https://github.com/squarooticus/tpm_futurepcr.git
-	branch = master
-	update = merge
+[submodule "pcr-oracle"]
+	path = pcr-oracle
+	url = ../pcr-oracle.git

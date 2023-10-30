@@ -28,6 +28,14 @@ add_keyscript_option() {
     printf %s "${work[*]}"
 }
 
+deescalate_run() {
+    if [ -n "$SUDO_USER" ]; then
+        sudo -u "$SUDO_USER" "$@"
+    else
+        "$@"
+    fi
+}
+
 CONFIGDIR=/etc/efi-measured-boot
 HOOKSDIR=/etc/initramfs-tools/hooks
 OTHER_HOOKS_DIR=/etc/initramfs
@@ -56,7 +64,7 @@ cp -f update-emboot "$BINDIR/"
 
 rm -f /boot/efi/EFI/debian/emboot.state
 
-(cd tpm_futurepcr && pipx install .)
+(cd pcr-oracle && deescalate_run ./configure && deescalate_run make && make install DESTDIR=/usr/local)
 
 rootdevinfo=( $(get_device_info /) )
 cryptdev=( $(get_crypttab_entry ${rootdevinfo[1]}) )
