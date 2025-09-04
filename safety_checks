@@ -1,7 +1,7 @@
 #! /bin/bash
 
 SYSTEMD_STUB=/usr/lib/systemd/boot/efi/linuxx64.efi.stub
-CHECKS=( root arch no_separate_boot mounted_efi root_luks systemd_stub tpm tpm_futurepcr packages binaries cryptsetup_version )
+CHECKS=( root arch no_separate_boot mounted_efi root_luks systemd_stub tpm pcr_oracle packages binaries cryptsetup_version )
 
 APPDIR=.
 . ./bash_functions
@@ -96,9 +96,9 @@ check_cryptsetup_version() {
     fi
 }
 
-check_tpm_futurepcr() {
-    if [ ! -r tpm_futurepcr/setup.py ]; then
-        echo "tpm_futurepcr/setup.py does not exist; did you forget to clone --recurse?" >&2
+check_pcr_oracle() {
+    if [ ! -r pcr-oracle/configure ]; then
+        echo "pcr-oracle/configure does not exist; did you forget to clone --recurse?" >&2
         return 1
     fi
 }

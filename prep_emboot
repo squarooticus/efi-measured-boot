@@ -56,7 +56,7 @@ cp -f update-emboot "$BINDIR/"
 
 rm -f /boot/efi/EFI/debian/emboot.state
 
-(cd tpm_futurepcr && pipx install --force .)
+(cd pcr-oracle && ./configure && make install DESTDIR=/usr/local)
 
 rootdevinfo=( $(get_device_info /) )
 cryptdev=( $(get_crypttab_entry ${rootdevinfo[1]}) )

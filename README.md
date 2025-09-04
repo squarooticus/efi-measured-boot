@@ -101,7 +101,7 @@ Eventually, I intend to turn this into an official Debian package, though manual
 
 ## Acknowledgements
 
-This project is heavily dependent on the work of Mantas Mikulėnas to parse the UEFI boot log in order to [predict future PCR values](https://github.com/grawity/tpm_futurepcr).
+This project is heavily dependent on [pcr-oracle](https://github.com/okirch/pcr-oracle) for predicting PCR values in future boot chains.
 
 ## Licensing
 
