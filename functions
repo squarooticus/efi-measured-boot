@@ -312,12 +312,35 @@ create_loader() {
     local kcli=$3
     local krel=$4
     local output=$5
-    lc_efi objcopy --add-section .osrel="/usr/lib/os-release" --change-section-vma .osrel=0x20000 \
-        --add-section .cmdline="$kcli" --change-section-vma .cmdline=0x30000 \
-        --add-section .krel="$krel" --change-section-vma .krel=0x40000 \
-        --add-section .linux="$kernel" --change-section-vma .linux=0x2000000 \
-        --add-section .initrd="$initrd" --change-section-vma .initrd=0x3000000 \
-        ${EFI_STUB:-/usr/lib/systemd/boot/efi/linuxx64.efi.stub} "$output"
+    local osrel=/usr/lib/os-release
+    local stub=${EFI_STUB:-/usr/lib/systemd/boot/efi/linuxx64.efi.stub}
+
+    local align=$(objdump -p "$stub" | awk '{ if ($1 == "SectionAlignment") { print $2; } }' | head -1)
+    align=$(( 16#${align:-1000} ))
+
+    local unaligned_offs=$(objdump -h "$stub" | gawk 'NF==7 { size=strtonum("0x"$3); offset=strtonum("0x"$4); } END { print size + offset; }')
+    local osrel_offs=$(( unaligned_offs + "$align" - unaligned_offs % "$align" ))
+    unaligned_offs=$(( osrel_offs + $(stat -Lc%s "$osrel") ))
+    local krel_offs=$(( unaligned_offs + "$align" - unaligned_offs % "$align" ))
+    unaligned_offs=$(( krel_offs + $(stat -Lc%s "$krel") ))
+    local cmdline_offs=$(( unaligned_offs + "$align" - unaligned_offs % "$align" ))
+    unaligned_offs=$(( cmdline_offs + $(stat -Lc%s "$kcli") ))
+    local initrd_offs=$(( unaligned_offs + "$align" - unaligned_offs % "$align" ))
+    unaligned_offs=$(( initrd_offs + $(stat -Lc%s "$initrd") ))
+    local linux_offs=$(( unaligned_offs + "$align" - unaligned_offs % "$align" ))
+
+    lc_efi objcopy \
+        --add-section .osrel="$osrel" \
+        --change-section-vma .osrel=$(printf 0x%x $osrel_offs) \
+        --add-section .krel="$krel" \
+        --change-section-vma .krel=$(printf 0x%x $krel_offs) \
+        --add-section .cmdline="$kcli" \
+        --change-section-vma .cmdline=$(printf 0x%x $cmdline_offs) \
+        --add-section .initrd="$initrd" \
+        --change-section-vma .initrd=$(printf 0x%x $initrd_offs) \
+        --add-section .linux="$kernel" \
+        --change-section-vma .linux=$(printf 0x%x $linux_offs) \
+        "$stub" "$output"
 }
 
 extract_krel_from_loader() {

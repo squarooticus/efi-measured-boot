@@ -443,6 +443,23 @@ remove_luks_token() {
     evict_luks_metadata "$cryptdev"
 }
 
+stub_does_extra_pcr_4_measurement() {
+    bsa_count=$(lc_tpm tpm2_eventlog /sys/kernel/security/tpm0/binary_bios_measurements 2>/dev/null | awk '
+    $1 == "-" && $2 == "EventNum:" { inpcr4=0; inbsa=0; next}
+    $1 == "PCRIndex:" && $2 == "4" { inpcr4=1; next }
+    inpcr4 && $1 == "EventType:" && $2 == "EV_EFI_BOOT_SERVICES_APPLICATION" { inbsa=1; print "pcr4bsa"; next }' | wc -l)
+    if (( bsa_count == 1 )); then
+        verbose_do -l $LL_TPM_DEBUG echo "One BSA event: assuming old stub" >&2
+        return 1
+    elif (( bsa_count == 2 )); then
+        verbose_do -l $LL_TPM_DEBUG echo "Two BSA events: assuming new stub; will measure kernel section" >&2
+        return 0
+    else
+        verbose_do -l $LL_TPM_DEBUG echo "BSA event count is $bsa_count > 2: unknown behavior, so defaulting to extra kernel section measurement" >&2
+        return 0
+    fi
+}
+
 # Given a working directory (or $PWD if empty) containing a monotonic counter
 # value `counter`; a path to a loader; and a kernel release string (of the form
 # returned by uname -r), seals the LUKS passphrase to the loader by predicting
@@ -472,7 +489,14 @@ seal_and_create_token() {
         return 1
     fi
 
-    predict_future_pcrs "$workdir"/pcrs --stop-event bsa-path="${current_loader//\\//}" 4 bsa "$loader"
+    local measurements=( 4 bsa "$loader" )
+    if stub_does_extra_pcr_4_measurement; then
+        local kernelf=$workdir/kernel.img
+        objcopy --dump-section .linux="$kernelf" "$loader"
+        measurements+=( 4 bsa "$kernelf" )
+    fi
+
+    predict_future_pcrs "$workdir"/pcrs --stop-event bsa-path="${current_loader//\\//}" "${measurements[@]}"
     seal_data "$workdir" <$LUKS_KEY
     import_luks_token "$workdir" "$cryptdev" "$krel"
 
