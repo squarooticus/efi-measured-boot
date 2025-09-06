@@ -86,7 +86,7 @@ check_packages() {
 }
 
 check_binaries() {
-    for bin in sgdisk efibootmgr cryptsetup sed awk tr grep sort uniq diff basename dirname mount tpm2_create tpm2_createprimary tpm2_flushcontext tpm2_load tpm2_nvdefine tpm2_nvincrement tpm2_nvread tpm2_nvreadpublic tpm2_pcrread tpm2_policynv tpm2_policypcr tpm2_shutdown tpm2_startauthsession tpm2_unseal lsblk objcopy update-initramfs dd jq; do
+    for bin in sgdisk efibootmgr cryptsetup sed awk tr grep sort uniq diff basename dirname mount tpm2_create tpm2_createprimary tpm2_flushcontext tpm2_load tpm2_nvdefine tpm2_nvincrement tpm2_nvread tpm2_nvreadpublic tpm2_pcrread tpm2_policynv tpm2_policypcr tpm2_shutdown tpm2_startauthsession tpm2_unseal lsblk objcopy update-initramfs dd jq gawk; do
         if [ -z "$(type -Pt "$bin")" ]; then
             echo "Cannot find $bin in path" >&2
             return 1
