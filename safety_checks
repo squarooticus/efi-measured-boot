@@ -112,6 +112,7 @@ check_binaries() {
         sed \
         sgdisk \
         sort \
+        strings \
         tpm2_create \
         tpm2_createprimary \
         tpm2_flushcontext \

@@ -444,6 +444,19 @@ remove_luks_token() {
 }
 
 stub_does_extra_pcr_4_measurement() {
+    local loader=$1
+    local stubver=$(strings "$loader" | grep LoaderInfo | awk '{print $4;}')
+    if [ -n "$stubver" ]; then
+        if (( ${stubver%%.*} < 252 )); then
+            verbose_do -l $LL_MISC echo "Found old stub (version $stubver)" >&2
+            return 1
+        else
+            verbose_do -l $LL_MISC echo "Found new stub (version $stubver)" >&2
+            return 0
+        fi
+    fi
+
+    verbose_do -l $LL_MISC echo "Stub version not found; falling back to checking event log" >&2
     bsa_count=$(lc_tpm tpm2_eventlog /sys/kernel/security/tpm0/binary_bios_measurements 2>/dev/null | awk '
     $1 == "-" && $2 == "EventNum:" { inpcr4=0; inbsa=0; next}
     $1 == "PCRIndex:" && $2 == "4" { inpcr4=1; next }
@@ -490,7 +503,7 @@ seal_and_create_token() {
     fi
 
     local measurements=( 4 bsa "$loader" )
-    if stub_does_extra_pcr_4_measurement; then
+    if stub_does_extra_pcr_4_measurement "$loader"; then
         local kernelf=$workdir/kernel.img
         objcopy --dump-section .linux="$kernelf" "$loader"
         measurements+=( 4 bsa "$kernelf" )
