@@ -157,7 +157,7 @@ check_pcr_oracle() {
 set -e
 
 for c in "${CHECKS[@]}"; do
-    echo -n "$c..." >&2
+    printf %s... "$c" >&2
     eval "check_$c"
-    echo "SUCCESS" >&2
+    printf 'SUCCESS\n' >&2
 done

@@ -162,20 +162,20 @@ qsort() {
 provision_counter() {
     if lc_tpm tpm2_nvreadpublic "$COUNTER_HANDLE"; then
         eval "$(lc_tpm tpm2_nvreadpublic "$COUNTER_HANDLE" | parse_yaml '' nvmd_)"
-        local invar=nvmd_$(printf "0x%x" $COUNTER_HANDLE)_attributes_value
+        local invar=nvmd_$(printf 0x%x $COUNTER_HANDLE)_attributes_value
         if [ -z "${!invar}" ]; then
-            echo "Cannot parse attributes for NV index $COUNTER_HANDLE" >&2
+            log_fatal -t tpm 'Cannot parse attributes for NV index %s' "$COUNTER_HANDLE"
             return 1
         fi
         declare -i attrs=${!invar}
         if (( (attrs & 0x20200f2) != 0x2020012 )); then
-            echo "Conflicting counter with invalid attributes at NV index $COUNTER_HANDLE (value=$attrs)" >&2
+            log_fatal -t tpm 'Conflicting counter with invalid attributes at NV index %s (value=%s)' "$COUNTER_HANDLE" "$attrs"
             return 1
         fi
-        echo "Using existing counter at NV index $COUNTER_HANDLE" >&2
+        log_info -t tpm 'Using existing counter at NV index %s' "$COUNTER_HANDLE"
     else
         if ! lc_tpm tpm2_nvdefine "$COUNTER_HANDLE" -C o -s 8 -a 'ownerread|ownerwrite|no_da|nt=counter'; then
-            echo "Unable to create counter at NV index $COUNTER_HANDLE" >&2
+            log_fatal -t tpm 'Unable to create counter at NV index %s' "$COUNTER_HANDLE"
             return 1
         fi
     fi
@@ -190,14 +190,14 @@ device_to_disk_and_partition() {
     local devpartuuid=$(lsblk -n -o PARTUUID -r "$dev" | tr a-z A-Z)
     local parents=( $(lsblk -s -n -o NAME -r "$dev" | tail -n +2) )
     if ((${#parents[@]} != 1)); then
-        echo "Do not know how to handle $dev with other than one parent: ${parents[*]}" >&2
+        log_fatal -t dev 'Do not know how to handle %s with other than one parent: %s' "$dev" "${parents[*]}"
         return 1
     fi
     local disk=/dev/${parents[0]}
     local part=$(printf %s "$dev" | grep -o '[0-9]\+$')
     local checkuuid=$(sgdisk "$disk" -i "$part" | grep -i 'Partition unique GUID' | sed 's/^.*://; s/[[:space:]]\+//g' | tr a-z A-Z)
     if [[ $devpartuuid != "$checkuuid" ]]; then
-        echo "PARTUUID mismatch: $dev ($devpartuuid) somehow not $disk partition $part ($checkuuid)" >&2
+        log_fatal -t dev 'PARTUUID mismatch: %s (%s) somehow not %s partition %s (%s)' "$dev" "$devpartuuid" "$disk" "$part" "$checkuuid"
         return 1
     fi
     printf %s "$disk $part"
@@ -215,7 +215,7 @@ get_crypttab_entry() {(
     local IFS=$'\n'
     local crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep 'UUID=\('"$(any_of_bre "${parentdevices[@]}")"'\)' || true) )
     if ((${#parentdevices[@]} == 0 || ${#crypttabentries[@]} == 0)); then
-        echo 'crypttab entry not found via UUID; trying node' >&2
+        log_warn -t luks 'crypttab entry not found via UUID; trying node'
         IFS=$OLDIFS
         local parentdevices=( $(lsblk -p -s -t $devnode -o NAME -n -r | grep '.' | sort | uniq) )
         IFS=$'\n'
@@ -223,12 +223,14 @@ get_crypttab_entry() {(
     fi
     IFS=$OLDIFS
     if ((${#parentdevices[@]} == 0 || ${#crypttabentries[@]} == 0)); then
-        echo 'crypttab entry not found' >&2
+        log_error -t luks 'crypttab entry not found'
         exit 1
     fi
     if ((${#crypttabentries[@]} > 1)); then
-        echo 'Filesystem in multiple crypttab entries unsupported' >&2
-        IFS=$'\n'; printf %s\\n "${crypttabentries[*]}"
+        log_error -t luks 'Filesystem in multiple crypttab entries unsupported'
+        for cte in "${crypttabentries[@]}"; do
+            log_error -t luks '%s' "$cte"
+        done
         exit 1
     fi
     local cryptdev=( ${crypttabentries[0]} )
@@ -246,7 +248,7 @@ get_device_info() {(
     local mount_point=$(stat -c '%m' $trace_path)
     local dev=( $(lsblk -n -o UUID,PATH,MOUNTPOINT -r | awk '$3 == "'"$mount_point"'" { print $1 " " $2; }') )
     if ((${#dev[@]} == 0)); then
-        echo "No block device found with mount point $mount_point" >&2
+        log_error -t dev 'No block device found with mount point %s' "$mount_point"
         exit 1
     fi
 
@@ -301,19 +303,19 @@ read_efi_vars() {
         local IFS=$'\t'
         local loader bootnum desc partuuid
         while read -r loader bootnum desc partuuid; do
-            verbose_do -l $LL_EFI eval 'printf "  reading EFI entry %s: desc=%s partuuid=%s loader=%s\n" "$bootnum" "$desc" "$partuuid" "$loader" >&2'
+            log_debug -t efi 'reading EFI entry %s: desc=%s partuuid=%s loader=%s' "$bootnum" "$desc" "$partuuid" "$loader"
             efi_apps[$(printf %s "$loader" | tr a-z A-Z)]="$bootnum"$'\t'"$desc"$'\t'"$partuuid"$'\t'"$loader"
-        done < <(lc_efi efibootmgr -v | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-fA-F-]\+\),.*File(\([^)]\+\)).*/\4\t\1\t\2\t\3/')
+        done < <(efibootmgr -v | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-fA-F-]\+\),.*File(\([^)]\+\)).*/\4\t\1\t\2\t\3/')
 
         local IFS=','
         declare -ga efi_boot_order
         efi_boot_order=( $(efibootmgr -v | grep '^BootOrder' | sed -e 's/^BootOrder: *//') )
         local IFS=$oldIFS
-        verbose_do -l $LL_EFI eval 'printf "  EFI boot order: ${efi_boot_order[*]}\n" >&2'
+        log_debug -t efi 'EFI boot order: %s' "${efi_boot_order[*]}"
 
         declare -g efi_boot_current
         efi_boot_current=$(efibootmgr -v | grep '^BootCurrent' | sed -e 's/^BootCurrent: *//')
-        verbose_do -l $LL_EFI eval 'printf "  EFI boot current: %s\n" "$efi_boot_current" >&2'
+        log_debug -t efi 'EFI boot current: %s' "$efi_boot_current"
 
         declare -g efi_vars_available=1
     fi
@@ -344,7 +346,7 @@ create_emboot_efi_entry() {
 read_luks_metadata() {
     local cryptdev=$1
     declare -gA luksmd
-    [ -n "${luksmd[$cryptdev]}" ] || luksmd[$cryptdev]=$(lc_crypt cryptsetup luksDump "$cryptdev" --dump-json-metadata)
+    [ -n "${luksmd[$cryptdev]}" ] || luksmd[$cryptdev]=$(lc_luks cryptsetup luksDump "$cryptdev" --dump-json-metadata)
     return 0
 }
 
@@ -365,7 +367,7 @@ list_luks_token_ids() {
     local cryptdev=$1
     local krel=$2
     read_luks_metadata "$cryptdev"
-    printf "%s" "${luksmd[$cryptdev]:-$(lc_crypt cryptsetup luksDump "$cryptdev" --dump-json-metadata)}" | lc_misc jq -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'"${krel:+ and .\"value\".\"krel\" == \"$krel\"}"')) | map(.key) | sort | join(" ")'
+    printf %s "${luksmd[$cryptdev]:-$(lc_luks cryptsetup luksDump "$cryptdev" --dump-json-metadata)}" | lc_misc jq -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'"${krel:+ and .\"value\".\"krel\" == \"$krel\"}"')) | map(.key) | sort | join(" ")'
 }
 
 # Outputs the index of the emboot key slot. If there is an existing emboot
@@ -378,24 +380,24 @@ get_emboot_key_slot() {
     local first_keyslot
     if ((${#emboot_token_ids[@]} > 0)); then
         local one_token_id=${emboot_token_ids[0]}
-        first_keyslot=$(printf "%s" "${luksmd[$cryptdev]}" | lc_misc jq -j '.tokens."'"$one_token_id"'".keyslots | first')
+        first_keyslot=$(printf %s "${luksmd[$cryptdev]}" | lc_misc jq -j '.tokens."'"$one_token_id"'".keyslots | first')
         if [ -n "$first_keyslot" -a "$first_keyslot" != "null" ]; then
-            if lc_crypt cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" --key-slot "$first_keyslot" "$cryptdev" </dev/null >/dev/null 2>&1; then
-                verbose_do -l 1 echo "Passphrase found in keyslot $first_keyslot (from token $one_token_id)" >&2
+            if lc_luks cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" --key-slot "$first_keyslot" "$cryptdev" </dev/null >/dev/null 2>&1; then
+                log_info -t luks 'Passphrase found in keyslot %s (from token %s)' "$first_keyslot" "$one_token_id"
                 printf %s "$first_keyslot"
                 return 0
             else
-                verbose_do -l 1 echo "Passphrase NOT found in keyslot $first_keyslot from token $one_token_id" >&2
+                log_warn -t luks 'Passphrase NOT found in keyslot %s from token %s' "$first_keyslot" "$one_token_id"
             fi
         fi
     fi
-    local keyslots=( $(printf "%s" "${luksmd[$cryptdev]}" | lc_misc jq -j '.keyslots | keys | join(" ")') )
+    local keyslots=( $(printf %s "${luksmd[$cryptdev]}" | lc_misc jq -j '.keyslots | keys | join(" ")') )
     local i
     for i in "${keyslots[@]}"; do
         if [ "$i" = "$first_keyslot" ]; then
-            verbose_do -l 1 echo "Skipping keyslot $i" >&2
-        elif lc_crypt cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" --key-slot "$i" "$cryptdev" </dev/null >/dev/null 2>&1; then
-            verbose_do -l 1 echo "Passphrase found in keyslot $i" >&2
+            log_debug -t luks 'Skipping keyslot %s' "$i"
+        elif lc_luks cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" --key-slot "$i" "$cryptdev" </dev/null >/dev/null 2>&1; then
+            log_info -t luks 'Passphrase found in keyslot %s' "$i"
             printf %s "$i"
             return 0
         fi
@@ -419,15 +421,15 @@ import_luks_token() {
     done
     local keyslot=$(get_emboot_key_slot "$cryptdev")
     [ -n "$keyslot" ] || {
-        echo "No key slots on $cryptdev matching $LUKS_KEY" >&2
+        log_fatal -t luks 'No key slots on %s matching %s' "$cryptdev" "$LUKS_KEY"
         return 1
     }
     lc_misc jq --null-input "${args[@]}" --arg krel "$krel" --arg keyslot "$keyslot" --arg updated "$(date +%s)" '{ "type": "emboot", "keyslots": [ $keyslot ], "krel": $krel, "updated": $updated'"$json"' }' >$workdir/token.json
     local current_token_ids=( $(list_luks_token_ids "$cryptdev" "$krel") )
     for k in "${current_token_ids[@]}"; do
-        lc_crypt cryptsetup token remove "$cryptdev" --token-id "$k"
+        lc_luks cryptsetup token remove "$cryptdev" --token-id "$k"
     done
-    lc_crypt cryptsetup token import "$cryptdev" --json-file "$workdir"/token.json
+    lc_luks cryptsetup token import "$cryptdev" --json-file "$workdir"/token.json
 
     evict_luks_metadata "$cryptdev"
 }
@@ -438,7 +440,7 @@ remove_luks_token() {
     local krel=$2
     local krel_token_ids=( $(list_luks_token_ids "$cryptdev" "$krel") )
     for k in "${krel_token_ids[@]}"; do
-        lc_crypt cryptsetup token remove "$cryptdev" --token-id "$k"
+        lc_luks cryptsetup token remove "$cryptdev" --token-id "$k"
     done
     evict_luks_metadata "$cryptdev"
 }
@@ -448,27 +450,27 @@ stub_does_extra_pcr_4_measurement() {
     local stubver=$(strings "$loader" | grep LoaderInfo | awk '{print $4;}')
     if [ -n "$stubver" ]; then
         if (( ${stubver%%.*} < 252 )); then
-            verbose_do -l $LL_MISC echo "Found old stub (version $stubver)" >&2
+            log_debug -t loader 'Found old stub (version %s)' "$stubver"
             return 1
         else
-            verbose_do -l $LL_MISC echo "Found new stub (version $stubver)" >&2
+            log_debug -t loader 'Found new stub (version %s)' "$stubver"
             return 0
         fi
     fi
 
-    verbose_do -l $LL_MISC echo "Stub version not found; falling back to checking event log" >&2
+    log_warn -t loader %s 'Stub version not found; falling back to checking event log'
     bsa_count=$(lc_tpm tpm2_eventlog /sys/kernel/security/tpm0/binary_bios_measurements 2>/dev/null | awk '
     $1 == "-" && $2 == "EventNum:" { inpcr4=0; inbsa=0; next}
     $1 == "PCRIndex:" && $2 == "4" { inpcr4=1; next }
     inpcr4 && $1 == "EventType:" && $2 == "EV_EFI_BOOT_SERVICES_APPLICATION" { inbsa=1; print "pcr4bsa"; next }' | wc -l)
     if (( bsa_count == 1 )); then
-        verbose_do -l $LL_TPM_DEBUG echo "One BSA event: assuming old stub" >&2
+        log_debug -t loader 'One BSA event: assuming old stub'
         return 1
     elif (( bsa_count == 2 )); then
-        verbose_do -l $LL_TPM_DEBUG echo "Two BSA events: assuming new stub; will measure kernel section" >&2
+        log_debug -t loader 'Two BSA events: assuming new stub; will measure kernel section'
         return 0
     else
-        verbose_do -l $LL_TPM_DEBUG echo "BSA event count is $bsa_count > 2: unknown behavior, so defaulting to extra kernel section measurement" >&2
+        log_debug -t loader 'BSA event count is %d > 2: unknown behavior, so defaulting to extra kernel section measurement' "$bsa_count"
         return 0
     fi
 }
@@ -498,7 +500,7 @@ seal_and_create_token() {
     elif [[ ${old_entry[0]} == "$efi_boot_current" ]]; then
         current_loader=${old_entry[3]}
     else
-        echo "Cannot seal under non-emboot boot chain (BootCurrent=$efi_boot_current)" >&2
+        log_fatal -t efi 'Cannot seal under non-emboot boot chain (BootCurrent=%s)' "$efi_boot_current"
         return 1
     fi
 
@@ -509,7 +511,10 @@ seal_and_create_token() {
         measurements+=( 4 bsa "$kernelf" )
     fi
 
-    predict_future_pcrs "$workdir"/pcrs --stop-event bsa-path="${current_loader//\\//}" "${measurements[@]}"
+    pcr_oracle_debug=
+    if (( EMBOOT_VERBOSE >= $LL_DEBUG )); then pcr_oracle_debug=-ddd; fi
+
+    predict_future_pcrs "$workdir"/pcrs $pcr_oracle_debug --stop-event bsa-path="${current_loader//\\//}" "${measurements[@]}"
     seal_data "$workdir" <$LUKS_KEY
     import_luks_token "$workdir" "$cryptdev" "$krel"
 
@@ -527,10 +532,10 @@ update_efi_entries() {(
     for lbn in emboot.efi emboot_old.efi; do
         oldIFS=$IFS; IFS=$'\t'; entry=( ${efi_apps[$(emboot_loader_path "$lbn" | tr a-z A-Z)]} ); IFS=$oldIFS
         if [[ -n "${entry[0]}" ]]; then
-            verbose_do -l 1 echo "Existing EFI boot loader entry ${entry[0]} for $lbn"
+            log 'Existing EFI boot loader entry %s for %s' "${entry[0]}" "$lbn"
         else
-            tag=$(echo -n "$lbn" | grep '_[^.]' | sed -e 's/^[^_]*_\([^.]\+\).*/\1/')
-            echo "Creating EFI boot loader entry for $lbn${tag:+ with tag $tag}"
+            tag=$(printf %s "$lbn" | grep '_[^.]' | sed -e 's/^[^_]*_\([^.]\+\).*/\1/')
+            log "Creating EFI boot loader entry for %s%s" "$lbn" "${tag:+ with tag $tag}"
             create_emboot_efi_entry "$lbn" "$tag"
             changes=1
         fi
@@ -554,11 +559,11 @@ update_efi_boot_order() {(
         primary_bn=${primary[0]}
         old_bn=${old[0]}
         if [ -z "$primary_bn" -o -z "$old_bn" ]; then
-            echo "Missing emboot EFI boot entries: not updating boot order"
+            log 'Missing emboot EFI boot entries: not updating boot order'
             exit 1
         fi
         if [ "${efi_boot_order[0]}" == "$primary_bn" -a "${efi_boot_order[1]}" == "$old_bn" ]; then
-            verbose_do -l 1 echo "No need to update EFI boot order"
+            log 'No need to update EFI boot order'
             exit 0
         fi
         new_boot_order=( $primary_bn $old_bn )
@@ -568,13 +573,13 @@ update_efi_boot_order() {(
             fi
         done
         IFS=','
-        echo "Updating EFI boot order to ${new_boot_order[*]}"
+        log 'Updating EFI boot order to %s' "${new_boot_order[*]}"
         efibootmgr -o "${new_boot_order[*]}"
         OFS=$oldIFS
 
         evict_efi_vars
     else
-        verbose_do -l 1 echo "Updating EFI boot order disabled by config"
+        log 'Updating EFI boot order disabled by config'
     fi
 
     exit 0
@@ -589,8 +594,8 @@ install_loaders() {(
     while getopts 'k:' opt; do
         case "$opt" in
             k) krel=$OPTARG ;;
-            :) echo "$OPTARG requires an argument"; exit 1;;
-            ?) echo "unknown argument"; exit 1;;
+            :) log_fatal -t core '%s requires an argument' "$OPTARG"; exit 1;;
+            ?) log_fatal -t core 'unknown argument'; exit 1;;
         esac
     done
     shift $((OPTIND-1))
@@ -610,15 +615,15 @@ install_loaders() {(
 
     cryptopts=${cryptdev[3]}
     if [[ $cryptopts != *luks* ]]; then
-        echo "crypttab entry missing luks option: $cryptopts"
+        log_fatal 'crypttab entry missing luks option: %s' "$cryptopts"
         exit 1
     fi
     if [[ $cryptopts != *keyscript=*emboot_unseal.sh* ]]; then
-        echo "keyscript option in crypttab entry missing or invalid: $cryptopts"
+        log_fatal 'keyscript option in crypttab entry missing or invalid: %s' "$cryptopts"
         exit 1
     fi
 
-    echo "root=UUID=${rootdev[0]} cryptdevice=${cryptdev[1]}:${cryptdev[0]} $KERNEL_PARAMS" >$tmpdir/kcli.txt
+    printf 'root=UUID=%s cryptdevice=%s:%s %s\n' "${rootdev[0]}" "${cryptdev[1]}" "${cryptdev[0]}" "$KERNEL_PARAMS" >$tmpdir/kcli.txt
 
     kernels=( $(list_installed_kernels) )
 
@@ -638,27 +643,27 @@ install_loaders() {(
 
             if [ -z "$krel" -o "$loader_krel" = "$krel" ]; then
                 if [ ! -e "$initrd" ]; then
-                    echo "Initrd image $initrd for $loader_krel unavailable to create loader $loader"
+                    log_warn -t loader 'Initrd image %s for %s unavailable to create loader %s' "$initrd" "$loader_krel" "$loader"
                     lc_misc rm -f "$loader"
                     if [ -z "$suffix" ]; then
-                        echo "WARNING: primary emboot EFI entry is unbootable!"
+                        log_error -t loader,efi 'ERROR: primary emboot EFI entry is unbootable!'
                     fi
                 else
-                    printf "%s" "$loader_krel" >$tmpdir/krel.txt
-                    echo "Creating EFI loader $loader for $loader_krel"
+                    printf %s "$loader_krel" >$tmpdir/krel.txt
+                    log 'Creating EFI loader %s for %s' "$loader" "$loader_krel"
                     create_loader "$kernel" "$initrd" "$tmpdir"/kcli.txt "$tmpdir"/krel.txt "$tmpdir"/linux.efi
                     lc_misc cp -f "$tmpdir"/linux.efi "$loader"
-                    verbose_do -l 1 echo "Removing any existing tokens for $loader_krel"
+                    log_info -t loader,luks 'Removing any existing tokens for %s' "$loader_krel"
                     remove_luks_token "${cryptdev[1]}" "$loader_krel"
                 fi
             else
-                verbose_do -l 1 echo "Skipping creation of EFI loader $loader for $loader_krel"
+                log_info -t loader 'Skipping creation of EFI loader %s for %s' "$loader" "$loader_krel"
             fi
         else
-            echo "No kernel available to create loader $loader"
+            log_warn -t loader 'No kernel available to create loader %s' "$loader"
             lc_misc rm -f "$loader"
             if [ -z "$suffix" ]; then
-                echo "WARNING: primary emboot EFI entry is unbootable!"
+                log_error -t loader,efi 'ERROR: primary emboot EFI entry is unbootable!'
             fi
         fi
     done
@@ -677,8 +682,8 @@ update_tokens() {(
         case "$opt" in
             k) krel=$OPTARG ;;
             a) all_kernels=1 ;;
-            :) echo "$OPTARG requires an argument"; exit 1;;
-            ?) echo "unknown argument"; exit 1;;
+            :) log_fatal -t core '%s requires an argument' "$OPTARG"; exit 1;;
+            ?) log_fatal -t core 'unknown argument'; exit 1;;
         esac
     done
     shift $((OPTIND-1))
@@ -705,7 +710,7 @@ update_tokens() {(
             if [ -n "$loader_krel" ]; then
                 token_ids=( $(list_luks_token_ids "${cryptdev[1]}" "$loader_krel") )
                 if [ -n "$all_kernels" -o "$krel" = "$loader_krel" -o ${#token_ids} -eq 0 ]; then
-                    echo "Creating token for EFI loader $loader for $loader_krel"
+                    log -t loader,luks 'Creating token for EFI loader %s for %s' "$loader" "$loader_krel"
                     # Read the counter once for all subsequent seal operations
                     [ -e "$tmpdir"/counter ] || {
                         read_counter "$tmpdir"/counter;
@@ -713,25 +718,25 @@ update_tokens() {(
                             cat "$tmpdir"/counter | xxd -p -c9999;
                             ((curctr=0x$(xxd -p -c9999 <$tmpdir/counter) ));
                             ((sealctr=curctr+$EMBOOT_ADD_TO_COUNTER));
-                            printf "%016x" $((sealctr)) | xxd -r -p -c9999 >$tmpdir/counter;
-                            printf "Using monotonic counter value %d (=%d+%d)\n" $((sealctr)) $((curctr)) "$EMBOOT_ADD_TO_COUNTER";
+                            printf %016x $((sealctr)) | xxd -r -p -c9999 >$tmpdir/counter;
+                            printf 'Using monotonic counter value %d (=%d+%d)\n' $((sealctr)) $((curctr)) "$EMBOOT_ADD_TO_COUNTER";
                             cat "$tmpdir"/counter | xxd -p -c9999;
                         fi;
                     }
                     seal_and_create_token "$tmpdir" "${cryptdev[1]}" "$loader" "$loader_krel"
                 else
-                    verbose_do -l 1 echo "Preserving existing token for EFI loader $loader for $loader_krel"
+                    log_info -t loader,luks 'Preserving existing token for EFI loader %s for %s' "$loader" "$loader_krel"
                 fi
             else
-                echo "Unable to extract kernel release from EFI loader $loader"
+                log_warn -t loader 'Unable to extract kernel release from EFI loader %s' "$loader"
                 if [ -z "$suffix" ]; then
-                    echo "WARNING: primary emboot EFI entry may be unbootable or may require manual passphrase entry!"
+                    log_error -t loader,luks,efi 'ERROR: primary emboot EFI entry may be unbootable or may require manual passphrase entry!'
                 fi
             fi
         else
-            echo "EFI loader $loader does not exist"
+            log_warn -t loader 'EFI loader %s does not exist' "$loader"
             if [ -z "$suffix" ]; then
-                echo "WARNING: primary emboot EFI entry is unbootable!"
+                log_error -t loader,efi 'ERROR: primary emboot EFI entry is unbootable!'
             fi
         fi
     done

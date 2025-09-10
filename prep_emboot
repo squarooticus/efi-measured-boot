@@ -52,7 +52,8 @@ cp -f initramfs-hooks/efi-measured-boot "$HOOKSDIR/"
 mkdir -p "$OTHER_HOOKS_DIR/post-update.d"
 for i in "$OTHER_HOOKS_DIR/post-update.d" "$KERNEL_HOOKS_DIR/postinst.d" "$KERNEL_HOOKS_DIR/postrm.d"; do
     test -e "$i"
-    cp -f kernel-hooks/update-emboot "$i"/zz-update-emboot
+    cp -f kernel-hooks/efi-measured-boot "$i"/zz-efi-measured-boot
+    rm -f "$i"/zz-update-emboot
 done
 
 mkdir -p "$APPDIR"

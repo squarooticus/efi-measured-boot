@@ -16,7 +16,7 @@ quote_args() {
     local space=""
     local w
     for w; do
-        printf %s "$space$(printf \'; printf %s "$w" | sed -e "s/'/'\\\\''/g"; printf \')"
+        printf %s "$space$(printf "'"; printf %s "$w" | sed -e "s/'/'\\\\''/g"; printf "'")"
         space=" "
     done
 }
@@ -89,26 +89,87 @@ ignore_err() {
     return 0
 }
 
-# Returns 0 if $EMBOOT_VERBOSE >= the given argument (or >= 1 if unspecified)
-is_verbose() {
-    [ -z "$EMBOOT_VERBOSE" ] || [ "$EMBOOT_VERBOSE" -ge "${1:-1}" ]
-}
+# Log levels, from most detail to most important. "Fatal" does not
+# automatically abort execution.
+LL_DEBUG=4
+LL_INFO=3
+LL_WARN=2
+LL_ERROR=1
+LL_FATAL=0
+LL_ALWAYS=0
 
-# Runs the given command, ignoring errors, if `is_verbose [<value for -l>]`.
-# Note that arguments will be expanded before even getting here, so use eval
-# with a (single-quoted) string to avoid doing unnecessary work.
-verbose_do() {
-    local OPTIND
-    local OPTARG
-    local level=1
-    while getopts 'l:' opt; do
+# Remember to declare `local OPTIND OPTARG topics level` beforehand, and `shift
+# $((OPTIND-1))` afterwards. Stops at `--`. Level defaults to $LL_INFO.
+log_parse_optargs() {
+    OPTIND=0
+    OPTARG=
+    topics=
+    level=${level:-$LL_INFO}
+    while getopts 't:l:-' opt; do
         case "$opt" in
+            t) topics=$OPTARG ;;
             l) level=$OPTARG ;;
-            ?) return 1;;
+            -) return ;;
+            ?) lc_core -l $LL_ERROR "Unknown option $OPTARG"
         esac
     done
+}
+
+# Returns 0 if the given topic/level would be logged
+would_log() {
+    local OPTIND OPTARG topics level
+    log_parse_optargs "$@"
     shift $((OPTIND-1))
-    if is_verbose $level; then
+
+    if [ $# -gt 0 ]; then
+        lc_core -l $LL_ERROR "Ignoring extraneous arguments to would_log: $*"
+    fi
+    [ -z "$EMBOOT_VERBOSE" ] || [ "$EMBOOT_VERBOSE" -ge "$level" ]
+}
+
+maxtopicwidth=15
+
+# By default, regular output that should always be displayed
+log() {
+    local OPTIND OPTARG topics level=$LL_ALWAYS
+    log_parse_optargs "$@"
+    shift $((OPTIND-1))
+
+    if would_log -t "$topics" -l $level; then
+        local log_line=
+        [ -z "$topics" ] || log_line=$log_line$(printf %-"${maxtopicwidth}"'s ' "[$topics]")
+        log_line=$log_line$(printf "$@")
+        printf '%s\n' "$log_line" >&2
+    fi
+}
+
+# Create the log_<level> functions
+for ll in debug info warn error fatal; do
+    eval " log_$ll() {
+    local OPTIND OPTARG topics level=\$LL_$(printf %s "$ll" | tr a-z A-Z)
+    log_parse_optargs \"\$@\"
+    shift \$((OPTIND-1))
+
+    if would_log -t \"\$topics\" -l \$level; then
+        local log_line=
+        [ -z \"\$topics\" ] || log_line=\$log_line\$(printf %-\"\${maxtopicwidth}\"'s ' \"[\$topics]\")
+        log_line=\$log_line\$(printf \"\$@\")
+        printf '%s\n' \"\$log_line\" >&2
+    fi
+}"
+done
+
+# Runs the given command, ignoring errors, if `would_log <optargs>`. (Also
+# takes comma-separated topics with `-t` for consistency with other logging
+# functions, but does nothing with them.) Note that arguments will be expanded
+# before even getting here, so use eval with a (single-quoted) string to avoid
+# doing unnecessary work.
+verbose_do() {
+    local OPTIND OPTARG topics level
+    log_parse_optargs "$@"
+    shift $((OPTIND-1))
+
+    if would_log -t "$topics" -l "$level"; then
         ignore_err "$@"
     fi
 }
@@ -135,48 +196,54 @@ fd_type() {
 fd_info() {
     fd=$1
     fdfile=/proc/self/fd/$fd
-    if [ "$(fd_type $1)" = '*' ]; then printf "%s" "$(readlink -f "$fdfile")"; fi
+    if [ "$(fd_type $1)" = '*' ]; then printf %s "$(readlink -f "$fdfile")"; fi
 }
 
-# Logs the given command to stderr if `is_verbose [<value for -l>]`. Runs the
-# command regardless.
+# Logs the given command to stderr if `would_log <optargs>`. Runs the command
+# regardless.
 log_command() {
-    local OPTIND
-    local OPTARG
-    local level=1
-    while getopts 'l:' opt; do
-        case "$opt" in
-            l) level=$OPTARG ;;
-            ?) return 1;;
-        esac
-    done
+    local OPTIND OPTARG topics level=$LL_DEBUG
+    log_parse_optargs "$@"
     shift $((OPTIND-1))
-    if is_verbose $level; then
+
+    if would_log -t "$topics" -l "$level"; then
         cmd=$(quote_args "$@")
         fdi=$(fd_info 0)
-        printf "  %s %s%s\n" "$(fd_type 0)" "$cmd" "${fdi:+" <$fdi"}" >&2
+        printf %-"${maxtopicwidth}"'s %s %s%s\n' "[$topics]" "$(fd_type 0)" "$cmd" "${fdi:+" <$fdi"}" >&2
     fi
     "$@"
 }
 
-LL_TPM=3
-LL_TPM_DEBUG=4
-LL_CRYPT=3
-LL_EFI=3
-LL_MISC=4
+# All lc_* functions default to level $LL_DEBUG because we don't want to see
+# the commands normally.
 
 lc_tpm() {
-    if ! is_verbose $LL_TPM_DEBUG && [ -z "${1##tpm2_*}" -a "$1" != "tpm2_nvreadpublic" -a "$1" != "tpm2_pcrread" ]; then
+    local OPTIND OPTARG topics level=$LL_DEBUG
+    log_parse_optargs "$@"
+    shift $((OPTIND-1))
+    topics=tpm${topics:+,}$topics
+
+    # This logic appears opposite the others because the `then` clause tells
+    # the tpm2 command to be quiet (`-Q`) unless it's one of a specific few
+    # where we need the output and it's redirected someplace.
+    if ! would_log -t "$topics" -l $level && [ -z "${1##tpm2_*}" -a "$1" != "tpm2_nvreadpublic" -a "$1" != "tpm2_pcrread" ]; then
         local cmd=$1
         shift
         set -- "$cmd" -Q "$@"
     fi
-    log_command -l $LL_TPM "$@";
+    log_command -t "$topics" -l $level "$@"
 }
 
-lc_crypt() { log_command -l $LL_CRYPT "$@"; }
-lc_efi()   { log_command -l $LL_EFI "$@"; }
-lc_misc()  { log_command -l $LL_MISC "$@"; }
+for class in core luks efi misc; do
+    eval " lc_$class() {
+    local OPTIND OPTARG topics level=\$LL_DEBUG
+    log_parse_optargs \"\$@\"
+    shift \$((OPTIND-1))
+    topics=$class\${topics:+,}\$topics
+
+    log_command -t \"\$topics\" -l \$level \"\$@\"
+}"
+done
 
 # Self-explanatory. From
 # https://github.com/mateusza/shellscripthttpd/blob/master/base64.sh
@@ -187,8 +254,8 @@ b64encode() {
     while getopts 'w:' opt; do
         case "$opt" in
             w) wrap=$OPTARG ;;
-            :) echo "$OPTARG requires an argument" >&2; return 1;;
-            ?) echo "unknown argument" >&2; return 1;;
+            :) log_error "%s requires an argument" "$OPTARG"; return 1;;
+            ?) log_error "unknown argument"; return 1;;
         esac
     done
     if [ "$wrap" = 0 ]; then
@@ -270,19 +337,19 @@ b64decode() {
 
 # Outputs the path to the given loader filename as mounted on the filesystem
 emboot_loader_unix_path() {
-    printf %s\\n "$EFI_MOUNT/EFI/$OS_SHORT_NAME/${1:-emboot.efi}"
+    printf '%s\n' "$EFI_MOUNT/EFI/$OS_SHORT_NAME/${1:-emboot.efi}"
 }
 
 # Outputs the UEFI runtime path to the loader (i.e., relative to the EFI system
 # partition root, using backslashes instead of forward slashes)
 emboot_loader_path() {
-    printf %s\\n '\EFI\'"$OS_SHORT_NAME"'\'"${1:-emboot.efi}"
+    printf '%s\n' '\EFI\'"$OS_SHORT_NAME"'\'"${1:-emboot.efi}"
 }
 
 # Converts a UEFI runtime path to a UNIX path relative to the filesystem root
 efi_path_to_unix() {
     printf %s "$EFI_MOUNT"
-    printf %s%s\\n "$1" | sed -e 's/\\/\//g'
+    printf '%s%s\n' "$1" | sed -e 's/\\/\//g'
 }
 
 # Outputs the kernel release for each given input kernel path. Requires that
@@ -352,7 +419,7 @@ extract_krel_from_loader() {
     lc_efi objcopy -O binary --only-section=.krel "$loader" "$of"
     krel=$(cat "$of")
     rm -f "$of"
-    [ -n "$krel" ] && printf "%s" "$krel"
+    [ -n "$krel" ] && printf %s "$krel"
 }
 
 # Increments the monotonic counter
@@ -386,8 +453,8 @@ split_by_length() {
     local arg=$1
     local len=$2
     while [ -n "$arg" ]; do
-        local entry=$(printf "%s" "$arg" | head -c $len)
-        printf "%s\n" "$entry"
+        local entry=$(printf %s "$arg" | head -c $len)
+        printf '%s\n' "$entry"
         arg=${arg#$entry}
     done
 }
@@ -417,7 +484,7 @@ diff_pcrs() {
 list_luks_token_ids() {
     local cryptdev=$1
     local krel=$2
-    lc_crypt cryptsetup luksDump "$cryptdev" --dump-json-metadata | lc_misc jq -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'"${krel:+ and .\"value\".\"krel\" == \"$krel\"}"')) | map(.key) | join(" ")'
+    lc_luks cryptsetup luksDump "$cryptdev" --dump-json-metadata | lc_misc jq -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'"${krel:+ and .\"value\".\"krel\" == \"$krel\"}"')) | map(.key) | join(" ")'
 }
 
 # Outputs the expected platform state and sealed data from a given token ID
@@ -426,7 +493,7 @@ export_luks_token() {
     local workdir=${1:-.}
     local cryptdev=$2
     local token_id=$3
-    md=$(lc_crypt cryptsetup token export "$cryptdev" --token-id "$token_id" 2>/dev/null)
+    md=$(lc_luks cryptsetup token export "$cryptdev" --token-id "$token_id" 2>/dev/null)
     if [ -z "$md" ]; then
         return 1
     fi
