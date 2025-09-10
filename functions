@@ -204,7 +204,7 @@ fd_info() {
 # the command itself but MUST be the first argument.
 log_command() {
     local silence_stderr=
-    if [ "$1" == "-Q" ]; then
+    if [ "$1" = "-Q" ]; then
         silence_stderr=1
         shift
     fi
