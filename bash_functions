@@ -160,7 +160,7 @@ qsort() {
 # one with the correct properties already exists. Errors if the NV handle is in
 # use with conflicting properties.
 provision_counter() {
-    if lc_tpm tpm2_nvreadpublic "$COUNTER_HANDLE"; then
+    if lc_tpm tpm2_nvreadpublic "$COUNTER_HANDLE" >/dev/null; then
         eval "$(lc_tpm tpm2_nvreadpublic "$COUNTER_HANDLE" | parse_yaml '' nvmd_)"
         local invar=nvmd_$(printf 0x%x $COUNTER_HANDLE)_attributes_value
         if [ -z "${!invar}" ]; then

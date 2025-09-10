@@ -200,8 +200,15 @@ fd_info() {
 }
 
 # Logs the given command to stderr if `would_log <optargs>`. Runs the command
-# regardless.
+# regardless. An additional option `-Q` will redirect stderr to /dev/null for
+# the command itself but MUST be the first argument.
 log_command() {
+    local silence_stderr=
+    if [ "$1" == "-Q" ]; then
+        silence_stderr=1
+        shift
+    fi
+
     local OPTIND OPTARG topics level=$LL_DEBUG
     log_parse_optargs "$@"
     shift $((OPTIND-1))
@@ -211,7 +218,12 @@ log_command() {
         fdi=$(fd_info 0)
         printf %-"${maxtopicwidth}"'s %s %s%s\n' "[$topics]" "$(fd_type 0)" "$cmd" "${fdi:+" <$fdi"}" >&2
     fi
-    "$@"
+
+    if [ -n "$silence_stderr" ]; then
+        "$@" 2>/dev/null
+    else
+        "$@"
+    fi
 }
 
 # All lc_* functions default to level $LL_DEBUG because we don't want to see
@@ -225,13 +237,18 @@ lc_tpm() {
 
     # This logic appears opposite the others because the `then` clause tells
     # the tpm2 command to be quiet (`-Q`) unless it's one of a specific few
-    # where we need the output and it's redirected someplace.
-    if ! would_log -t "$topics" -l $level && [ -z "${1##tpm2_*}" -a "$1" != "tpm2_nvreadpublic" -a "$1" != "tpm2_pcrread" ]; then
+    # where we need the output and it's redirected someplace. Either way, `!
+    # would_log` means silencing stderr.
+    local silence_stderr=
+    if ! would_log -t "$topics" -l $level; then
+        silence_stderr=1
+    fi
+    if [ -n "$silence_stderr" -a -z "${1##tpm2_*}" -a "$1" != "tpm2_nvreadpublic" -a "$1" != "tpm2_pcrread" ]; then
         local cmd=$1
         shift
         set -- "$cmd" -Q "$@"
     fi
-    log_command -t "$topics" -l $level "$@"
+    log_command ${silence_stderr:+-Q} -t "$topics" -l $level "$@"
 }
 
 for class in core luks efi misc; do
