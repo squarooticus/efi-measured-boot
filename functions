@@ -91,6 +91,7 @@ ignore_err() {
 
 # Log levels, from most detail to most important. "Fatal" does not
 # automatically abort execution.
+LL_DEBUG_DETAIL=5
 LL_DEBUG=4
 LL_INFO=3
 LL_WARN=2
