@@ -210,14 +210,14 @@ get_crypttab_entry() {(
 
     set -e
 
-    local parentdevices=( $(lsblk -s -t $devnode -o UUID -n -r | grep '.' | sort | uniq) )
+    local parentdevices=( $(lsblk -s $devnode -o UUID -n -r | grep '.' | sort | uniq) )
     local OLDIFS=$IFS
     local IFS=$'\n'
     local crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep 'UUID=\('"$(any_of_bre "${parentdevices[@]}")"'\)' || true) )
     if ((${#parentdevices[@]} == 0 || ${#crypttabentries[@]} == 0)); then
         log_warn -t luks 'crypttab entry not found via UUID; trying node'
         IFS=$OLDIFS
-        local parentdevices=( $(lsblk -p -s -t $devnode -o NAME -n -r | grep '.' | sort | uniq) )
+        local parentdevices=( $(lsblk -p -s $devnode -o NAME -n -r | grep '.' | sort | uniq) )
         IFS=$'\n'
         crypttabentries=( $(sed -e 's/#.*//' /etc/crypttab | grep "$(any_of_bre "${parentdevices[@]}")" || true) )
     fi
