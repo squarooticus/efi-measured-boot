@@ -305,16 +305,16 @@ read_efi_vars() {
         while read -r loader bootnum desc partuuid; do
             log_debug -t efi 'reading EFI entry %s: desc=%s partuuid=%s loader=%s' "$bootnum" "$desc" "$partuuid" "$loader"
             efi_apps[$(printf %s "$loader" | tr a-z A-Z)]="$bootnum"$'\t'"$desc"$'\t'"$partuuid"$'\t'"$loader"
-        done < <(efibootmgr -v | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-fA-F-]\+\),.*File(\([^)]\+\)).*/\4\t\1\t\2\t\3/')
+        done < <(efibootmgr -v 2>/dev/null | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-fA-F-]\+\),.*File(\([^)]\+\)).*/\4\t\1\t\2\t\3/')
 
         local IFS=','
         declare -ga efi_boot_order
-        efi_boot_order=( $(efibootmgr -v | grep '^BootOrder' | sed -e 's/^BootOrder: *//') )
+        efi_boot_order=( $(efibootmgr -v 2>/dev/null | grep '^BootOrder' | sed -e 's/^BootOrder: *//') )
         local IFS=$oldIFS
         log_debug -t efi 'EFI boot order: %s' "${efi_boot_order[*]}"
 
         declare -g efi_boot_current
-        efi_boot_current=$(efibootmgr -v | grep '^BootCurrent' | sed -e 's/^BootCurrent: *//')
+        efi_boot_current=$(efibootmgr -v 2>/dev/null | grep '^BootCurrent' | sed -e 's/^BootCurrent: *//')
         log_debug -t efi 'EFI boot current: %s' "$efi_boot_current"
 
         declare -g efi_vars_available=1
@@ -338,7 +338,7 @@ create_emboot_efi_entry() {
     local efidisk=${efi_disk_and_part[0]}
     local efipartition=${efi_disk_and_part[1]}
     local loader="\\EFI\\$OS_SHORT_NAME\\$loader_basename"
-    lc_efi efibootmgr -C -d "$efidisk" -p "$efipartition" -l "$loader" -L "$OS_SHORT_NAME emboot${tag:+ ($tag)}"
+    lc_efi efibootmgr -C -d "$efidisk" -p "$efipartition" -l "$loader" -L "$OS_SHORT_NAME emboot${tag:+ ($tag)}" 2>/dev/null
 }
 
 # Given a crypto device, populates `luksmd` with the output of dumping the LUKS
@@ -574,7 +574,7 @@ update_efi_boot_order() {(
         done
         IFS=','
         log 'Updating EFI boot order to %s' "${new_boot_order[*]}"
-        efibootmgr -o "${new_boot_order[*]}"
+        efibootmgr -o "${new_boot_order[*]}" 2>/dev/null
         OFS=$oldIFS
 
         evict_efi_vars
