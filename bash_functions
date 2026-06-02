@@ -104,58 +104,6 @@ compare_versions() {
     return 2
 }
 
-# Sorts the given array according to the given comparison function. The
-# comparison function must satisfy the return value scheme from
-# compare_versions above, with return value 4 indicating comparison error.
-qsort() {
-    local aname=$1
-    declare -n aref=$aname
-    local compare=$2
-    local start=${3:-0}
-    local end=${4:-$((${#aref[@]} - 1))}
-
-    # Algorithm based on Hoare partitioning pseudocode at
-    # https://en.wikipedia.org/wiki/Quicksort
-    if ((start >= end)); then
-        return
-    fi
-    local pivot=${aref[$start]}
-    local i=$((start - 1))
-    local j=$((end + 1))
-    local cmpi cmpj
-    while true; do
-        ((i++))
-        $compare "${aref[$i]}" "$pivot"
-        cmpi=$?
-        while ((cmpi < 2)); do
-            ((i++))
-            $compare "${aref[$i]}" "$pivot"
-            cmpi=$?
-        done
-        if ((cmpi == 4)); then return 4; fi
-
-        ((j--))
-        $compare "${aref[$j]}" "$pivot"
-        cmpj=$?
-        while ((cmpj > 2 && cmpj != 4)); do
-            ((j--))
-            $compare "${aref[$j]}" "$pivot"
-            cmpj=$?
-        done
-        if ((cmpi == 4)); then return 4; fi
-
-        if ((i >= j)); then
-            break
-        fi
-
-        local swap=${aref[$i]}
-        aref[$i]=${aref[$j]}
-        aref[$j]=$swap
-    done
-    qsort "$aname" "$compare" $start $j
-    qsort "$aname" "$compare" $((j + 1)) $end
-}
-
 # Provisions the monotonic counter used to prevent downgrade attacks, unless
 # one with the correct properties already exists. Errors if the NV handle is in
 # use with conflicting properties.
@@ -256,30 +204,20 @@ get_device_info() {(
 )}
 
 # Output a space-separated list of kernel images in /boot in reverse order
-# (highest first).
+# (highest version first).
 list_installed_kernels() {(
-    declare -a kvers
-    shopt -s nullglob
-    local kvers=( /boot/vmlinuz* )
+    declare -A ver_to_file
+    while read -r kver kimgf; do
+        ver_to_file[$kver]=$kimgf
+    done < <( linux-version list --paths )
 
-    set +e
+    declare -a newest_first=( $( linux-version sort --reverse $(linux-version list) ) )
 
-    kver_descending() {
-        local vers=( $(kernel_path_to_release "$@") )
-        # Strip the trailing -<arch> because by semver rules it would cause the
-        # numeric Debian revision to be compared as a string.
-        vers=( "${vers[@]%%-[^/0-9.-]*}" )
-        if ((${#vers[@]} != 2)); then return 4; fi
-        compare_versions "${vers[@]}"
-        local rc=$?
-        return $((4-rc))
-    }
-
-    qsort kvers kver_descending
-    if (($? == 4)); then return 1; fi
-
-    local IFS=" "
-    printf %s "${kvers[*]}"
+    space=
+    for v in "${newest_first[@]}"; do
+        printf "%s%s" "$space" "${ver_to_file[$v]}"
+        space=' '
+    done
 )}
 
 # Populates:
