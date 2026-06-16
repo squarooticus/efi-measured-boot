@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project does
 
-This is a Debian-focused system for TPM 2.0-measured EFI boot with automatic, non-interactive LUKS2 root unlock. The system:
+This is a Debian package for TPM 2.0-measured EFI boot with automatic, non-interactive LUKS2 root unlock. The system:
 
 1. Builds monolithic EFI kernel blobs (kernel + initrd + cmdline bundled via `objcopy` into a systemd-boot EFI stub)
 2. Uses `pcr-oracle` (a git submodule) to predict future TPM PCR values based on the current boot's event log
@@ -12,33 +12,63 @@ This is a Debian-focused system for TPM 2.0-measured EFI boot with automatic, no
 4. Stores the sealed blob as a custom LUKS2 token (`"type": "emboot"`) in the LUKS header
 5. At boot, `emboot_unseal.sh` (a cryptsetup `keyscript`) tries to unseal and pass the passphrase to the kernel; falls back to interactive passphrase entry on any failure
 
-## Installation flow
-
-Three-step process driven by `Makefile`:
+## Building the package
 
 ```
-sudo make install   # runs safety_checks + prep_emboot: installs hooks/scripts, builds pcr-oracle, modifies /etc/crypttab
-                    # inspect/edit /etc/efi-measured-boot/config, then:
-sudo make step2     # runs prep_emboot_2: provisions TPM counter, generates LUKS key, rebuilds initrd, sets next-boot EFI entry
-                    # reboot and enter LUKS passphrase; if boot succeeds, then:
-sudo make step3     # runs update-emboot -s: seals LUKS passphrase to PCR predictions, creates LUKS tokens
+make deb            # runs dpkg-buildpackage -b -us -uc
 ```
+
+Requires build-depends from `debian/control`: `gcc`, `make`, `pkg-config`, `libtss2-dev`, `libjson-c-dev`, `libssl-dev`. The build compiles `pcr-oracle` from the submodule (must be initialized: `git submodule update --init`).
+
+## User workflow after installation
+
+```
+apt install ./efi-measured-boot_*.deb
+
+# Optional: check and prepare the system
+sudo emboot-prepare
+
+# Optional: edit config (OS_SHORT_NAME, SEAL_PCRS, KERNEL_PARAMS, etc.)
+$EDITOR /etc/efi-measured-boot/config
+
+# First-time setup: modifies crypttab, provisions TPM counter, adds LUKS key,
+# rebuilds initrd, sets next-boot EFI entry
+sudo emboot-setup
+
+sudo reboot   # emboot-firstboot.service seals automatically on first emboot boot
+```
+
+Subsequent kernel installs/removals are handled automatically by hooks in `postinst.d`, `postrm.d`, and `post-update.d`.
 
 ## Key scripts and their roles
 
-- **`functions`** — POSIX sh library (sourced in initramfs context). Contains logging, TPM wrappers (`seal_data`, `unseal_data`), LUKS token management, and EFI loader creation (`create_loader`).
-- **`bash_functions`** — Bash library (sourced in normal root context). Extends `functions` with bash-specific utilities: `compare_versions`, `provision_counter`, LUKS metadata caching, EFI variable management, and the high-level operations (`install_loaders`, `update_tokens`, `seal_and_create_token`).
-- **`update-emboot`** — Main entry point for ongoing maintenance. Called by kernel hooks on install/remove.
-- **`emboot_unseal.sh`** — Initramfs keyscript. Runs as POSIX sh inside the initrd; sources `functions` (not `bash_functions`).
-- **`safety_checks`** — Pre-install validation: checks arch, root, packages, LUKS2, TPM availability, and pcr-oracle submodule.
-- **`prep_emboot`** — Step 1 installer: copies files to `/usr/local/share/efi-measured-boot`, installs hooks, builds `pcr-oracle`, writes `/etc/efi-measured-boot/config`.
-- **`prep_emboot_2`** — Step 2 installer: provisions TPM NV counter, adds LUKS key, rebuilds initrd.
+- **`functions`** — POSIX sh library sourced in initramfs context. Contains logging, TPM wrappers (`seal_data`, `unseal_data`), LUKS token management, EFI loader creation (`create_loader`).
+- **`bash_functions`** — Bash library for the normal root context. Extends `functions` with `compare_versions`, `provision_counter`, LUKS metadata caching, EFI variable management, and high-level operations (`install_loaders`, `update_tokens`, `seal_and_create_token`).
+- **`update-emboot`** — Main entry point for ongoing maintenance; called by kernel hooks on install/remove. Installed to `/usr/sbin/update-emboot`.
+- **`emboot-setup`** — First-time setup script: modifies crypttab, provisions TPM counter, generates LUKS key, enables firstboot service, rebuilds initrd, sets next-boot.
+- **`emboot-firstboot`** — Called by `emboot-firstboot.service` on first boot from the emboot chain; runs `update-emboot -s` once and disables itself.
+- **`emboot-prepare`** — Guided wizard: checks system readiness (arch, UEFI mode, GRUB, ESP, LUKS2, TPM), automates safe steps (grub-efi install, GRUB_ENABLE_CRYPTODISK), and prints instructions for risky steps.
+- **`emboot_unseal.sh`** — Initramfs keyscript (POSIX sh); sources `functions` (not `bash_functions`); tries TPM unseal and falls back to interactive passphrase.
+- **`safety_checks`** — Runtime-only checks (root, arch, LUKS2, TPM, boot layout); called internally by `emboot-setup`. Dependency checks are handled by Debian packaging.
+
+## Debian package structure
+
+```
+debian/
+  control                      # package metadata + Depends
+  rules                        # builds pcr-oracle submodule, installs binary
+  changelog / copyright
+  postinst                     # generates /etc/efi-measured-boot/config template
+  postrm                       # removes /etc/efi-measured-boot on purge
+  efi-measured-boot.install    # file install manifest
+  emboot-firstboot.service     # systemd one-shot unit for initial sealing
+```
 
 ## Configuration
 
-Runtime config lives in `/etc/efi-measured-boot/config` (shell variables sourced by all scripts):
+Runtime config at `/etc/efi-measured-boot/config` (generated by postinst if absent):
 
-| Variable | Default / Example | Purpose |
+| Variable | Default | Purpose |
 |---|---|---|
 | `EFI_MOUNT` | `/boot/efi` | ESP mount point |
 | `OS_SHORT_NAME` | `debian` | Used in EFI loader path: `\EFI\<name>\emboot.efi` |
@@ -47,7 +77,7 @@ Runtime config lives in `/etc/efi-measured-boot/config` (shell variables sourced
 | `LUKS_KEY` | `/etc/keys/root-emboot.key` | Path to the LUKS key file |
 | `KERNEL_PARAMS` | `"ro add_efi_memmap"` | Extra kernel command line parameters |
 | `UPDATE_BOOT_ORDER` | `y` | Whether to reorder EFI boot entries |
-| `APPDIR` | `/usr/local/share/efi-measured-boot` | Where `functions` and `emboot_unseal.sh` are installed |
+| `APPDIR` | `/usr/share/efi-measured-boot` | Where `functions` and `emboot_unseal.sh` are installed |
 | `VERBOSE` / `EMBOOT_VERBOSE` | (unset) | Verbosity: 0=normal, 3=info, 4=debug, 5=debug+detail |
 
 ## EFI loader management
@@ -65,7 +95,7 @@ Each loader is a PE binary (`objcopy` embedding `.osrel`, `.krel`, `.cmdline`, `
 - `/etc/kernel/postrm.d/zz-efi-measured-boot` — runs `update-emboot -r -k <krel>` + increments counter on kernel removal
 - `/etc/initramfs/post-update.d/zz-efi-measured-boot` — runs `update-emboot` when initrd changes
 
-`initramfs-hooks/efi-measured-boot` is installed as `/etc/initramfs-tools/hooks/efi-measured-boot` and copies required binaries (`tpm2_*`, `jq`) and config into the initramfs.
+`initramfs-hooks/efi-measured-boot` is installed as `/etc/initramfs-tools/hooks/efi-measured-boot` and copies required binaries (`tpm2_*`, `jq`, `libtss2-tcti-device.so.0`) and config into the initramfs.
 
 ## Logging system
 
@@ -73,21 +103,9 @@ Log levels (defined in `functions`): `LL_ALWAYS=0`, `LL_FATAL=0`, `LL_ERROR=1`, 
 
 Functions: `log`, `log_fatal`, `log_error`, `log_warn`, `log_info`, `log_debug`. All output goes to stderr. Topic tags (e.g., `-t tpm`, `-t luks,efi`) are printed as a left-aligned prefix. `log_command` / `lc_tpm` / `lc_luks` / `lc_efi` / `lc_core` / `lc_misc` wrap external command execution with logging.
 
-## pcr-oracle submodule
-
-`pcr-oracle/` is a git submodule (cloned from `../pcr-oracle.git`). It is a C binary that predicts future PCR values by replaying the TPM event log up to a specified stop-event and extending with measurements for the new EFI loader. Built in-tree during `prep_emboot` via:
-
-```sh
-cd pcr-oracle && ./configure && make && make install DESTDIR=/usr/local
-```
-
-Installed to `/usr/local/bin/pcr-oracle`. The submodule must be initialized (`git submodule update --init`) before running safety checks or installation.
-
 ## update-emboot usage
 
 ```
-update-emboot [options]
-
 # Default: rebuild loaders and reseal tokens
 sudo update-emboot
 
@@ -106,15 +124,17 @@ sudo update-emboot -r -k 6.1.0-25-amd64
 # Increment monotonic counter (invalidates all existing sealed tokens)
 sudo update-emboot -i
 
-# Verbose output
-sudo update-emboot -v        # level 3 (info)
-sudo update-emboot -vv       # level 4 (debug)
-sudo update-emboot -vvv      # level 5 (debug+detail)
+# Verbose output (-v = info, -vv = debug, -vvv = debug+detail)
+sudo update-emboot -v
 
 # Dry run (print commands without executing)
 sudo update-emboot -n
 ```
 
+## pcr-oracle submodule
+
+`pcr-oracle/` is a git submodule (relative URL `../pcr-oracle.git`). It is a C binary that predicts future PCR values by replaying the TPM event log and extending with measurements for the new EFI loader. Built during `dpkg-buildpackage` via `debian/rules`. Installed to `/usr/bin/pcr-oracle`. Initialize with `git submodule update --init` before building.
+
 ## System requirements
 
-x86_64 only. Requires: `cryptsetup-initramfs`, `initramfs-tools`, `tpm2-tools`, `efibootmgr`, `jq`, `gdisk` (`sgdisk`), `objcopy`, `gawk`. Dev packages for `json-c` and `tss2-esys` are needed to build `pcr-oracle`. LUKS2 root device with at least one PBKDF2-hashed passphrase is required (for GRUB recovery compatibility).
+x86_64 only; all runtime dependencies declared in `debian/control`. Root device must be LUKS2 with at least one PBKDF2-hashed passphrase. ESP must be mounted at `/boot/efi` as vfat. `/boot` must not be a separate partition.

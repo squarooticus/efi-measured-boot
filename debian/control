@@ -1,0 +1,35 @@
+Source: efi-measured-boot
+Section: admin
+Priority: optional
+Maintainer: Kyle Rose <krose@krose.org>
+Build-Depends: debhelper-compat (= 13), gcc, make, pkg-config,
+ libtss2-dev, libjson-c-dev, libssl-dev
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: efi-measured-boot
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends},
+ cryptsetup-initramfs,
+ cryptsetup (>= 2.4.0),
+ initramfs-tools,
+ tpm2-tools,
+ jq,
+ xxd,
+ efibootmgr,
+ gdisk,
+ binutils,
+ gawk,
+ linux-base,
+ systemd-boot-efi
+Description: TPM 2.0 measured EFI boot with automatic LUKS2 root unlock
+ Boots Linux directly from UEFI firmware (no intermediate bootloader),
+ seals a LUKS2 root passphrase to TPM 2.0 PCR values, and automatically
+ unlocks the encrypted root at boot without user interaction when the
+ measured boot chain matches the expected state.
+ .
+ Supports downgrade prevention via a monotonic TPM NV counter, and falls
+ back to interactive passphrase entry under any unexpected failure.
+ .
+ After installation, run emboot-prepare (optional) to check system
+ readiness, then emboot-setup to configure the system.

@@ -1,0 +1,195 @@
+#!/bin/bash
+
+exec 3>&1 >&2
+
+set -e
+
+# ---------------------------------------------------------------------------
+# Runtime safety checks (dependency checks are handled by Debian packaging)
+# ---------------------------------------------------------------------------
+
+check_root() {
+    if [ "$(id -u)" != 0 ]; then
+        echo "Must run as root (e.g., using sudo)" >&2
+        return 1
+    fi
+}
+
+check_arch() {
+    if [ "$(uname -m)" != "x86_64" ]; then
+        echo "Unsupported architecture $(uname -m)" >&2
+        return 1
+    fi
+}
+
+check_no_separate_boot() {
+    if [ "$(stat -c '%m' /boot)" != "/" ]; then
+        echo "/boot must be on the root device (not a separate partition)" >&2
+        return 1
+    fi
+}
+
+check_mounted_efi() {
+    if [ "$(stat -c '%m' /boot/efi)" != "/boot/efi" ]; then
+        echo "EFI system partition must be mounted at /boot/efi" >&2
+        return 1
+    elif [ "$(stat -f -c '%T' /boot/efi)" != "msdos" ] || \
+         [ "$(mount | awk '$3 == "/boot/efi" { print $5; }')" != "vfat" ]; then
+        echo "Filesystem at /boot/efi must be vfat" >&2
+        return 1
+    fi
+}
+
+check_root_luks() {
+    local cryptdev
+    cryptdev=( $(get_crypttab_entry "$(get_device_info / | awk '{print $2;}')" ) )
+    if (( ${#cryptdev[@]} == 0 )); then
+        echo "Root device has no crypttab entry" >&2
+        return 1
+    fi
+    if [[ ${cryptdev[3]} != *luks* ]]; then
+        echo "crypttab entry missing luks option: ${cryptdev[3]}" >&2
+        return 1
+    fi
+    if ! cryptsetup isLuks "${cryptdev[1]}" --type luks2; then
+        echo "Root must be hosted on a LUKS2 partition" >&2
+        return 1
+    fi
+    if (( $(cryptsetup luksDump "${cryptdev[1]}" --dump-json-metadata | \
+            jq -r '.keyslots | to_entries |
+                   map(.value | select(.kdf.type == "pbkdf2") | 1) | length') == 0 )); then
+        echo "At least one LUKS passphrase must use pbkdf2 KDF (required for GRUB recovery)" >&2
+        return 1
+    fi
+}
+
+check_tpm() {
+    if ! tpm2_pcrread -Q 2>/dev/null; then
+        echo "TPM does not appear to be available or working" >&2
+        return 1
+    fi
+}
+
+run_checks() {
+    local failed=
+    for c in root arch no_separate_boot mounted_efi root_luks tpm; do
+        printf '%s... ' "$c" >&2
+        if eval "check_$c"; then
+            printf 'OK\n' >&2
+        else
+            failed=1
+        fi
+    done
+    [ -z "$failed" ]
+}
+
+# ---------------------------------------------------------------------------
+# Crypttab helpers (ported from prep_emboot)
+# ---------------------------------------------------------------------------
+
+remove_keyscript_option() {
+    local IFS=','
+    declare -a work
+    work=( $1 )
+    for i in "${!work[@]}"; do
+        if [[ ${work[$i]} == keyscript=* ]]; then
+            unset -v work[$i]
+        fi
+    done
+    work=("${work[@]}")
+    printf %s "${work[*]}"
+}
+
+add_keyscript_option() {
+    local IFS=','
+    declare -a work
+    work=( $1 )
+    work+=( "keyscript=/usr/share/efi-measured-boot/emboot_unseal.sh" )
+    printf %s "${work[*]}"
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+. /etc/efi-measured-boot/config
+. "$APPDIR/bash_functions"
+
+run_checks
+
+if [ -e /etc/efi-measured-boot/config.new ]; then
+    echo "A new config template is waiting at /etc/efi-measured-boot/config.new" >&2
+    echo "Review it, merge any changes into /etc/efi-measured-boot/config, then re-run emboot-setup." >&2
+    exit 1
+fi
+
+rootdevinfo=( $(get_device_info /) )
+cryptdev=( $(get_crypttab_entry "${rootdevinfo[1]}") )
+
+cryptopts=${cryptdev[3]}
+if [[ $cryptopts == *keyscript=* ]]; then
+    echo "WARNING: existing keyscript option will be replaced: $cryptopts" >&2
+    cryptopts=$(remove_keyscript_option "$cryptopts")
+fi
+cryptopts=$(add_keyscript_option "$cryptopts")
+
+# From here on, changes are potentially breaking. Set up cleanup on failure.
+revert_changes() {
+    echo "CLEANING UP" >&2
+    if [ -e /etc/crypttab.pre_emboot ]; then
+        echo "reverting crypttab" >&2
+        mv -f /etc/crypttab.pre_emboot /etc/crypttab
+    fi
+    rm -f /etc/efi-measured-boot/pending-seal
+}
+trap 'rc=$?; trap - EXIT; [ "$rc" -eq 0 ] && exit 0; revert_changes' EXIT
+
+echo "Modifying /etc/crypttab" >&2
+awk -v newopts="$cryptopts" \
+    '$1 == "'"${cryptdev[0]}"'" && $2 == "'"${cryptdev[1]}"'" \
+     { print $1 " " $2 " " $3 " " newopts; next; } { print $0; }' \
+    /etc/crypttab >/etc/crypttab.new
+if diff -q /etc/crypttab /etc/crypttab.new >/dev/null 2>&1; then
+    echo "No crypttab change required" >&2
+    rm -f /etc/crypttab.new
+else
+    mv -f /etc/crypttab /etc/crypttab.pre_emboot
+    mv -f /etc/crypttab.new /etc/crypttab
+fi
+
+echo "Provisioning TPM monotonic counter at NV index $COUNTER_HANDLE" >&2
+provision_counter
+
+mkdir -m 0700 -p "$(dirname "$LUKS_KEY")"
+if [ -e "$LUKS_KEY" ]; then
+    echo "Using existing key $LUKS_KEY" >&2
+else
+    echo "Generating new key for root partition LUKS header" >&2
+    (umask 077 && dd if=/dev/urandom of="$LUKS_KEY" bs=128 count=1)
+fi
+if ! cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" "${cryptdev[1]}" \
+        </dev/null >/dev/null 2>&1; then
+    echo "You may be prompted to enter an existing LUKS passphrase for your root partition" >&2
+    cryptsetup luksAddKey --pbkdf pbkdf2 --pbkdf-force-iterations 1000 \
+        "${cryptdev[1]}" "$LUKS_KEY"
+fi
+
+touch /etc/efi-measured-boot/pending-seal
+systemctl enable emboot-firstboot.service
+
+echo "Rebuilding initramfs (sealing will happen after reboot)" >&2
+EMBOOT_KERNEL_HOOK_NO_SEAL=1 update-initramfs -u -k all
+
+echo "Setting next EFI boot to the emboot loader" >&2
+read_efi_vars
+bn=${efi_apps[$(emboot_loader_path | tr a-z A-Z)]%%$'\t'*}
+if [ -z "$bn" ]; then
+    echo "Cannot find emboot EFI boot entry for $(emboot_loader_path)" >&2
+    echo "Re-run emboot-setup after the EFI entry is created." >&2
+    exit 1
+fi
+efibootmgr -n "$bn" 2>/dev/null
+
+echo "" >&2
+echo "Setup complete. Reboot now to activate the emboot chain." >&2
+echo "On first boot, the system will automatically seal the LUKS passphrase to the TPM." >&2

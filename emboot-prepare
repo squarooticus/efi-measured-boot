@@ -1,0 +1,347 @@
+#!/bin/bash
+
+# Guided wizard that checks system readiness for efi-measured-boot and
+# automates the safe preparation steps (grub-efi install, GRUB config).
+# Risky steps (partition changes, encryption) are explained but not performed.
+
+set -e
+
+PASS="[PASS]"
+FAIL="[FAIL]"
+WARN="[WARN]"
+INFO="[INFO]"
+SKIP="[SKIP]"
+
+blocking_issues=()
+warnings=()
+automated_available=()
+
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+
+status() { printf '%-8s %s\n' "$1" "$2" >&2; }
+indent() { sed 's/^/         /' >&2; }
+
+ask_confirm() {
+    local prompt=$1
+    local reply
+    read -r -p "         $prompt [y/N] " reply
+    [[ $reply == [yY] ]]
+}
+
+# ---------------------------------------------------------------------------
+# Checks
+# ---------------------------------------------------------------------------
+
+check_root() {
+    if [ "$(id -u)" != 0 ]; then
+        status "$FAIL" "Not running as root — re-run with sudo"
+        blocking_issues+=( "Must run as root" )
+        return 1
+    fi
+    status "$PASS" "Running as root"
+}
+
+check_arch() {
+    local arch
+    arch=$(uname -m)
+    if [ "$arch" != "x86_64" ]; then
+        status "$FAIL" "Unsupported architecture: $arch (x86_64 required)"
+        blocking_issues+=( "Unsupported architecture: $arch" )
+        return 1
+    fi
+    status "$PASS" "Architecture: $arch"
+}
+
+check_uefi_mode() {
+    if [ ! -d /sys/firmware/efi ]; then
+        status "$FAIL" "Not booted in UEFI mode (CSM/legacy BIOS active)"
+        blocking_issues+=( "System is not booted in UEFI mode" )
+        cat <<'EOF' | indent
+To fix: Enter your firmware settings (BIOS) at boot and:
+  1. Disable the CSM (Compatibility Support Module) / legacy BIOS support
+  2. Ensure Secure Boot is disabled (efi-measured-boot does not sign loaders)
+  3. Save and reboot in UEFI-only mode
+EOF
+        return 1
+    fi
+    status "$PASS" "Booted in UEFI mode"
+}
+
+# Returns 0 if grub-efi is the active bootloader, 1 otherwise.
+# Sets grub_efi_installed and grub_pc_installed.
+check_grub() {
+    grub_efi_installed=
+    grub_pc_installed=
+    if dpkg-query -W -f='${Status}' grub-efi-amd64 2>/dev/null | grep -q "ok installed"; then
+        grub_efi_installed=1
+    fi
+    if dpkg-query -W -f='${Status}' grub-pc 2>/dev/null | grep -q "ok installed"; then
+        grub_pc_installed=1
+    fi
+
+    if [ -n "$grub_efi_installed" ]; then
+        status "$PASS" "grub-efi-amd64 is installed"
+
+        # Check GRUB_ENABLE_CRYPTODISK
+        if [ -f /etc/default/grub ]; then
+            if grep -qE '^\s*GRUB_ENABLE_CRYPTODISK\s*=\s*[yY1]' /etc/default/grub 2>/dev/null; then
+                status "$PASS" "GRUB_ENABLE_CRYPTODISK=y is set"
+            else
+                status "$WARN" "GRUB_ENABLE_CRYPTODISK is not set (needed for GRUB recovery boot)"
+                warnings+=( "GRUB_ENABLE_CRYPTODISK should be enabled for recovery" )
+                automated_available+=( "set_grub_cryptodisk" )
+            fi
+        fi
+        return 0
+    fi
+
+    if [ -n "$grub_pc_installed" ]; then
+        status "$FAIL" "grub-pc (legacy BIOS) is installed; grub-efi is required"
+        blocking_issues+=( "grub-efi must be installed (grub-pc detected)" )
+        automated_available+=( "install_grub_efi" )
+        return 1
+    fi
+
+    status "$WARN" "Neither grub-efi-amd64 nor grub-pc found"
+    blocking_issues+=( "A bootloader must be installed" )
+    return 1
+}
+
+check_esp() {
+    esp_ok=
+    if [ "$(stat -c '%m' /boot/efi 2>/dev/null)" != "/boot/efi" ]; then
+        status "$FAIL" "EFI system partition not mounted at /boot/efi"
+        blocking_issues+=( "ESP must be mounted at /boot/efi" )
+        cat <<'EOF' | indent
+To fix:
+  1. Identify your ESP partition (usually type EF00 in gdisk):
+       gdisk -l /dev/sda
+  2. Format it as FAT32 if needed:
+       mkfs.vfat -F 32 /dev/sdaX
+  3. Add to /etc/fstab:
+       UUID=<ESP-UUID>  /boot/efi  vfat  umask=0077  0  1
+  4. Mount it:
+       mkdir -p /boot/efi && mount /boot/efi
+EOF
+        return 1
+    fi
+
+    local esp_size_bytes
+    esp_size_bytes=$(df -B1 --output=size /boot/efi | tail -1 | tr -d ' ')
+    local esp_size_mib=$(( esp_size_bytes / 1048576 ))
+    local esp_free_bytes
+    esp_free_bytes=$(df -B1 --output=avail /boot/efi | tail -1 | tr -d ' ')
+    local esp_free_mib=$(( esp_free_bytes / 1048576 ))
+
+    if (( esp_size_bytes < 500 * 1048576 )); then
+        status "$WARN" "ESP is ${esp_size_mib}MiB (500MiB+ recommended for two kernel blobs)"
+        warnings+=( "ESP may be too small (${esp_size_mib}MiB); monitor for space issues" )
+    else
+        status "$PASS" "ESP mounted at /boot/efi (${esp_size_mib}MiB, ${esp_free_mib}MiB free)"
+    fi
+    esp_ok=1
+}
+
+check_boot_on_root() {
+    if [ "$(stat -c '%m' /boot 2>/dev/null)" != "/" ]; then
+        status "$FAIL" "/boot is on a separate partition (must be on root device)"
+        blocking_issues+=( "/boot must be on the root device (not a separate partition)" )
+        cat <<'EOF' | indent
+To fix (do from a live USB to avoid moving a mounted partition):
+  1. Unmount /boot/efi
+  2. Remount /boot somewhere else (e.g., /mnt):
+       mount --bind /boot /mnt
+  3. Copy its contents to the root /boot:
+       tar -C /mnt -c . | tar -C /boot -xvp  # after unmounting /boot
+  4. Remove or comment the /boot line from /etc/fstab
+  5. Reinstall grub-efi: grub-install /dev/sda && update-grub
+EOF
+        return 1
+    fi
+    status "$PASS" "/boot is on the root device"
+}
+
+check_luks() {
+    luks_ok=
+    local rootdev
+    rootdev=$(lsblk -n -o PATH,MOUNTPOINT -r | awk '$2 == "/" { print $1; }' | head -1)
+    if [ -z "$rootdev" ]; then
+        status "$FAIL" "Cannot determine root device"
+        blocking_issues+=( "Cannot determine root block device" )
+        return 1
+    fi
+
+    # Walk up the device stack to find the crypto device
+    local cryptdev
+    cryptdev=$(lsblk -s -n -o TYPE,PATH -r "$rootdev" 2>/dev/null | \
+               awk '$1 == "crypt" { print $2; }' | head -1)
+
+    if [ -z "$cryptdev" ]; then
+        status "$FAIL" "Root device ($rootdev) does not appear to be on a dm-crypt device"
+        blocking_issues+=( "Root must be on a LUKS2 dm-crypt device" )
+        cat <<'EOF' | indent
+To encrypt an unencrypted root (WARNING: back up first; do from a live USB):
+  cryptsetup reencrypt --encrypt --reduce-device-size 32M \
+      --pbkdf pbkdf2 /dev/<root-partition>
+Then update /etc/crypttab and rebuild the initramfs.
+EOF
+        return 1
+    fi
+
+    if ! cryptsetup isLuks "$cryptdev" 2>/dev/null; then
+        status "$FAIL" "$cryptdev does not appear to be a LUKS device"
+        blocking_issues+=( "$cryptdev is not a LUKS device" )
+        return 1
+    fi
+
+    local luks_version
+    luks_version=$(cryptsetup luksDump "$cryptdev" 2>/dev/null | \
+                   awk '/^Version:/ { print $2; }' | head -1)
+
+    if [ "$luks_version" != "2" ]; then
+        status "$FAIL" "Root is LUKS$luks_version (LUKS2 required)"
+        blocking_issues+=( "Root LUKS device must use LUKS2 metadata (currently LUKS${luks_version})" )
+        cat <<'EOF' | indent
+To convert LUKS1 to LUKS2 (can be done from initramfs shell):
+  cryptsetup convert --type luks2 /dev/<crypto-partition>
+Then reinstall grub-efi and reboot.
+EOF
+        return 1
+    fi
+
+    status "$PASS" "Root device $cryptdev uses LUKS2"
+
+    # Check for PBKDF2 keyslot (required for GRUB recovery)
+    local pbkdf2_count
+    pbkdf2_count=$(cryptsetup luksDump "$cryptdev" --dump-json-metadata 2>/dev/null | \
+                   jq -r '.keyslots | to_entries |
+                           map(.value | select(.kdf.type == "pbkdf2") | 1) | length')
+    if [ "${pbkdf2_count:-0}" -eq 0 ]; then
+        status "$WARN" "No PBKDF2 keyslot found (needed for GRUB recovery boot)"
+        warnings+=( "Add a PBKDF2-hashed passphrase for GRUB recovery" )
+        cat <<'EOF' | indent
+GRUB 2.12 does not support Argon2 PBKDF. To add a PBKDF2-hashed passphrase:
+  cryptsetup luksConvertKey --pbkdf pbkdf2 /dev/<crypto-partition>
+(Or add a new keyslot: cryptsetup luksAddKey --pbkdf pbkdf2 /dev/<crypto-partition>)
+EOF
+    else
+        status "$PASS" "LUKS2 device has at least one PBKDF2 keyslot (GRUB recovery capable)"
+    fi
+
+    luks_ok=1
+}
+
+check_tpm() {
+    if tpm2_pcrread -Q 2>/dev/null; then
+        status "$PASS" "TPM 2.0 is present and accessible"
+    else
+        status "$FAIL" "TPM 2.0 is not available or not working"
+        blocking_issues+=( "TPM 2.0 must be present and enabled" )
+        cat <<'EOF' | indent
+To fix: Enter your firmware settings (BIOS) and:
+  - Enable TPM 2.0 (may be labeled "PTT", "fTPM", or "Security Chip")
+  - Set the PCR hash algorithm to SHA-256
+EOF
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Automated fixup actions
+# ---------------------------------------------------------------------------
+
+do_install_grub_efi() {
+    echo "" >&2
+    status "$INFO" "Will install grub-efi-amd64 and grub-efi-amd64-signed"
+    echo "         This will uninstall grub-pc." >&2
+    if ! ask_confirm "Install grub-efi?"; then
+        echo "         Skipped." >&2
+        return
+    fi
+    apt-get install --yes grub-efi-amd64 grub-efi-amd64-signed
+
+    # Find the boot disk (parent of the root device)
+    local rootdev
+    rootdev=$(lsblk -n -o PATH,MOUNTPOINT -r | awk '$2 == "/" { print $1; }' | head -1)
+    local bootdisk
+    bootdisk=$(lsblk -s -n -o NAME -r "$rootdev" | tail -1)
+    bootdisk="/dev/$bootdisk"
+
+    echo "         Running grub-install on $bootdisk" >&2
+    grub-install "$bootdisk"
+    update-grub
+    echo "         grub-efi installed successfully." >&2
+    grub_efi_installed=1
+}
+
+do_set_grub_cryptodisk() {
+    echo "" >&2
+    status "$INFO" "Will set GRUB_ENABLE_CRYPTODISK=y in /etc/default/grub"
+    if ! ask_confirm "Update /etc/default/grub?"; then
+        echo "         Skipped." >&2
+        return
+    fi
+    if grep -qE '^\s*#?\s*GRUB_ENABLE_CRYPTODISK' /etc/default/grub; then
+        sed -i 's/^\s*#\?\s*GRUB_ENABLE_CRYPTODISK.*/GRUB_ENABLE_CRYPTODISK=y/' \
+            /etc/default/grub
+    else
+        echo 'GRUB_ENABLE_CRYPTODISK=y' >>/etc/default/grub
+    fi
+    update-grub
+    echo "         Done." >&2
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+echo "" >&2
+echo "=== efi-measured-boot system readiness check ===" >&2
+echo "" >&2
+
+check_root || true
+check_arch || true
+check_uefi_mode || true
+check_grub || true
+check_esp || true
+check_boot_on_root || true
+check_luks || true
+check_tpm || true
+
+# Run automated fixups if available
+for action in "${automated_available[@]}"; do
+    case "$action" in
+        install_grub_efi)   do_install_grub_efi ;;
+        set_grub_cryptodisk) do_set_grub_cryptodisk ;;
+    esac
+done
+
+echo "" >&2
+echo "=== Summary ===" >&2
+
+if [ ${#blocking_issues[@]} -gt 0 ]; then
+    echo "" >&2
+    echo "Blocking issues that must be resolved before running emboot-setup:" >&2
+    for issue in "${blocking_issues[@]}"; do
+        echo "  - $issue" >&2
+    done
+fi
+
+if [ ${#warnings[@]} -gt 0 ]; then
+    echo "" >&2
+    echo "Warnings (non-blocking, but recommended to address):" >&2
+    for w in "${warnings[@]}"; do
+        echo "  - $w" >&2
+    done
+fi
+
+echo "" >&2
+if [ ${#blocking_issues[@]} -eq 0 ]; then
+    echo "System is ready. Run 'sudo emboot-setup' to continue." >&2
+    exit 0
+else
+    echo "Resolve the blocking issues above, then re-run emboot-prepare." >&2
+    exit 1
+fi

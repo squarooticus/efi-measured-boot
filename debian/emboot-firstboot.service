@@ -1,0 +1,12 @@
+[Unit]
+Description=EFI Measured Boot - initial TPM seal
+After=sysinit.target local-fs.target
+ConditionPathExists=/etc/efi-measured-boot/pending-seal
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/emboot-firstboot
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

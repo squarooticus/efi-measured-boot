@@ -17,7 +17,9 @@ esac
 for i in createprimary flushcontext load nvread pcrread policynv policypcr startauthsession unseal; do
     copy_exec /usr/bin/tpm2_$i /usr/bin
 done
-copy_exec /usr/lib/x86_64-linux-gnu/libtss2-tcti-device.so.0 /usr/lib/x86_64-linux-gnu
+tcti=$(find /usr/lib -name 'libtss2-tcti-device.so.0' 2>/dev/null | head -1)
+[ -n "$tcti" ] || { echo "efi-measured-boot initramfs hook: libtss2-tcti-device.so.0 not found" >&2; exit 1; }
+copy_exec "$tcti" "${tcti#/}"
 copy_exec /usr/bin/jq /usr/bin
 
 mkdir -p "$DESTDIR"/etc/efi-measured-boot

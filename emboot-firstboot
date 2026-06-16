@@ -1,0 +1,29 @@
+#!/bin/bash
+
+set -e
+
+. /etc/efi-measured-boot/config
+. "$APPDIR/bash_functions"
+
+read_efi_vars
+
+local_IFS=$IFS
+IFS=$'\t'
+primary_entry=( ${efi_apps[$(emboot_loader_path | tr a-z A-Z)]} )
+old_entry=( ${efi_apps[$(emboot_loader_path emboot_old.efi | tr a-z A-Z)]} )
+IFS=$local_IFS
+
+cleanup() {
+    systemctl disable emboot-firstboot.service 2>/dev/null || true
+    rm -f /etc/efi-measured-boot/pending-seal
+}
+trap cleanup EXIT
+
+if [[ ${primary_entry[0]} != "$efi_boot_current" && \
+      ${old_entry[0]} != "$efi_boot_current" ]]; then
+    echo "emboot-firstboot: not booted from emboot chain (BootCurrent=$efi_boot_current)" >&2
+    echo "Run 'update-emboot -s' manually after booting from the emboot entry." >&2
+    exit 0
+fi
+
+update-emboot -s
