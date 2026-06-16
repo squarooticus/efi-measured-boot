@@ -63,6 +63,18 @@ check_root_luks() {
     fi
 }
 
+check_esp_size() {
+    local esp_size_bytes
+    esp_size_bytes=$(df -B1 --output=size /boot/efi | tail -1 | tr -d ' ')
+    local esp_size_mib=$(( esp_size_bytes / 1048576 ))
+    if (( esp_size_bytes < 500 * 1048576 )); then
+        echo "ESP is ${esp_size_mib}MiB; 500MiB minimum required for two kernel blobs" >&2
+        return 1
+    elif (( esp_size_bytes < 1024 * 1048576 )); then
+        echo "WARNING: ESP is ${esp_size_mib}MiB; consider expanding to 1GiB to accommodate future kernel/initrd growth" >&2
+    fi
+}
+
 check_tpm() {
     if ! tpm2_pcrread -Q 2>/dev/null; then
         echo "TPM does not appear to be available or working" >&2
@@ -72,7 +84,7 @@ check_tpm() {
 
 run_checks() {
     local failed=
-    for c in root arch no_separate_boot mounted_efi root_luks tpm; do
+    for c in root arch no_separate_boot mounted_efi esp_size root_luks tpm; do
         printf '%s... ' "$c" >&2
         if eval "check_$c"; then
             printf 'OK\n' >&2
