@@ -22,88 +22,6 @@ quote_args() {
     done
 }
 
-# Compares two dot-delimited decimal-element version numbers a and b that may
-# also have arbitrary string suffixes. Compatible with semantic versioning, but
-# not as strict: comparisons of non-semver strings may have unexpected
-# behavior.
-#
-# Returns:
-# 1 if a<b
-# 2 if equal
-# 3 if a>b
-compare_versions() {
-    local LC_ALL=C
-
-    # Optimization
-    if [[ $1 == "$2" ]]; then
-        return 2
-    fi
-
-    # Compare numeric release versions. Supports an arbitrary number of numeric
-    # elements (i.e., not just X.Y.Z) in which unspecified indices are regarded
-    # as 0.
-    local aver=${1%%[^0-9.]*} bver=${2%%[^0-9.]*}
-    local arem=${1#$aver} brem=${2#$bver}
-    local IFS=.
-    local i a=($aver) b=($bver)
-    for ((i=0; i<${#a[@]} || i<${#b[@]}; i++)); do
-        if ((10#${a[i]:-0} < 10#${b[i]:-0})); then
-            return 1
-        elif ((10#${a[i]:-0} > 10#${b[i]:-0})); then
-            return 3
-        fi
-    done
-
-    # Remove build metadata before remaining comparison
-    arem=${arem%%+*}
-    brem=${brem%%+*}
-
-    # Prelease (w/remainder) always older than release (no remainder)
-    if [ -n "$arem" -a -z "$brem" ]; then
-        return 1
-    elif [ -z "$arem" -a -n "$brem" ]; then
-        return 3
-    fi
-
-    # Otherwise, split by periods and compare individual elements either
-    # numerically or lexicographically
-    local a=(${arem#-}) b=(${brem#-})
-    for ((i=0; i<${#a[@]} && i<${#b[@]}; i++)); do
-        local anns=${a[i]#${a[i]%%[^0-9]*}} bnns=${b[i]#${b[i]%%[^0-9]*}}
-        if [ -z "$anns$bnns" ]; then
-            # Both numeric
-            if ((10#${a[i]:-0} < 10#${b[i]:-0})); then
-                return 1
-            elif ((10#${a[i]:-0} > 10#${b[i]:-0})); then
-                return 3
-            fi
-        elif [ -z "$anns" ]; then
-            # Numeric comes before non-numeric
-            return 1
-        elif [ -z "$bnns" ]; then
-            # Numeric comes before non-numeric
-            return 3
-        else
-            # Compare lexicographically
-            if [[ ${a[i]} < ${b[i]} ]]; then
-                return 1
-            elif [[ ${a[i]} > ${b[i]} ]]; then
-                return 3
-            fi
-        fi
-    done
-
-    # Fewer elements is earlier
-    if ((${#a[@]} < ${#b[@]})); then
-        return 1
-    elif ((${#a[@]} > ${#b[@]})); then
-        return 3
-    fi
-
-    # Must be equal!
-    return 2
-}
-
 # Provisions the monotonic counter used to prevent downgrade attacks, unless
 # one with the correct properties already exists. Errors if the NV handle is in
 # use with conflicting properties.
@@ -158,6 +76,15 @@ get_crypttab_entry() {(
 
     set -e
 
+    local crypt_count
+    crypt_count=$(lsblk -s "$devnode" -o TYPE -n -r | grep -c '^crypt$' || true)
+    if ((crypt_count > 1)); then
+        log_error -t luks \
+            'Root device has %d independent dm-crypt layers; only a single LUKS device is supported' \
+            "$crypt_count"
+        exit 1
+    fi
+
     local parentdevices=( $(lsblk -s $devnode -o UUID -n -r | grep '.' | sort | uniq) )
     local OLDIFS=$IFS
     local IFS=$'\n'
@@ -193,14 +120,12 @@ get_device_info() {(
 
     set -e
 
-    local mount_point=$(stat -c '%m' $trace_path)
-    local dev=( $(lsblk -n -o UUID,PATH,MOUNTPOINT -r | awk '$3 == "'"$mount_point"'" { print $1 " " $2; }') )
-    if ((${#dev[@]} == 0)); then
-        log_error -t dev 'No block device found with mount point %s' "$mount_point"
+    local result
+    result=$(findmnt -n -o UUID,SOURCE -T "$trace_path") || {
+        log_error -t dev 'No block device found for path %s' "$trace_path"
         exit 1
-    fi
-
-    printf %s "${dev[0]} ${dev[1]}"
+    }
+    printf %s "$result"
 )}
 
 # Output a space-separated list of kernel images in /boot in reverse order
@@ -353,7 +278,7 @@ import_luks_token() {
     local json=
     local k
     for k in counter pcrs sealed.priv sealed.pub; do
-        b64encode -w 0 <$workdir/$k >$workdir/$k.b64
+        base64 -w 0 <$workdir/$k >$workdir/$k.b64
         args+=( --rawfile "${k//./_}" "$workdir/$k.b64" )
         json+=", \"$k\": \$${k//./_}"
     done
