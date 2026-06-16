@@ -9,10 +9,6 @@ The primary goal of this project is to prevent unauthorized boot chains (from BI
 - Always fall back to console passphrase entry, even under a broad range of unexpected failure scenarios ("unknown unknowns").
 - Automatically update EFI loaders and the sealed LUKS passphrase as kernels are installed/removed and initrd images are updated.
 
-## Status
-
-Presently, a bunch of scripts and a Makefile that, when used on a machine with a LUKS-encrypted root filesystem and a UEFI firmware, will result in a TPM 2.0-enabled measured Linux boot supporting non-interactive mount of the encrypted root volume.
-
 ## Preparation
 
 The installation procedure requires that your system be prepared in a few specific ways:
@@ -23,7 +19,7 @@ The installation procedure requires that your system be prepared in a few specif
 * Secure boot must be disabled, as this software does not currently support signing the resulting EFI loaders.
 * The root device must be hosted on a dm-crypt device with LUKS2 metadata (version 2 required for token support).
 * `/boot` must not be a separate partition, but instead must be hosted on the encrypted root device. (This is mainly a safety measure to prevent any unintended future use of unprotected boot chains.)
-* You must have a compliant EFI System Partition mounted under `/boot/efi` with sufficient space to allow the installation of two kernel blobs (each roughly the size of the kernel and initrd combined: for future growth in kernel sizes, target 500M or more).
+* You must have a compliant EFI System Partition mounted under `/boot/efi` with sufficient space to allow the installation of two kernel blobs (each roughly the size of the kernel and initrd combined: for future growth in kernel sizes, target 1GiB or more; 500MiB is the hard minimum).
 
 The easiest way to meet most of these requirements is to get grub-efi working with GRUB encrypted boot (`GRUB_ENABLE_CRYPTODISK=y` in `/etc/defaults/grub`) and verify that you can boot using the GRUB UEFI entry by entering the root passphrase when GRUB first starts up. While this measured boot solution by design bypasses GRUB and boots directly from EFI, I recommend retaining a working grub-efi install for recovery and for debugging when the ability to change the kernel command line is required.
 
@@ -38,7 +34,7 @@ Roughly speaking, the steps involved in preparation for install are:
 ### If your disk is (legacy) MBR-partitioned and/or lacks (or has too small) an EFI system partition (hereafter called "ESP"), convert to GPT and create/resize the required partitions:
 
 1. See the [top answer on this StackExchange question](https://serverfault.com/questions/963178/how-do-i-convert-my-linux-disk-from-mbr-to-gpt-with-uefi). The highlights are:
-    * Repartition to add/resize/move the ESP (type `EF00`) so it is at least 500M. (I personally have 1G ESPs. I'm not gonna miss the space, but I will very much feel the annoyance at having to increase its size again during the lifetime of a machine.)
+    * Repartition to add/resize/move the ESP (type `EF00`) so it is at least 500MiB (1GiB recommended). (I personally have 1G ESPs. I'm not gonna miss the space, but I will very much feel the annoyance at having to increase its size again during the lifetime of a machine.)
         * You will probably need to do this step from the live image you created earlier, since you won't be able to shrink or move a mounted root partition.
         * This step can be very complicated if you need to move large partitions around to make space. There's no particular reason to place the ESP at the beginning of the disk, so if you don't have enough space there, it's fine to shrink the last data partition to create enough space.
         * Remember to shrink from inner layer to outer and then grow from outer back to inner, leaving enough slack in each reduction to make sure you don't accidentally truncate any of the layers: e.g., for ext4-on-LVM-on-dm-crypt-on-md, `resize2fs`, then `lvresize` (if necessary), then `pvresize`, then `cryptsetup resize`, then `mdadm --grow` (yes, `--grow` is also used to shrink), then `gdisk` or `parted`; then `partprobe`; and then do it all in the reverse order without any sizes specified (layer sizes will be auto-detected) to make sure there's no abandoned space.
@@ -93,15 +89,56 @@ Your system should now be ready to install the EFI measured boot software stack.
 
 ## Installation
 
+Build the package from source (requires `gcc`, `make`, `pkg-config`, `libtss2-dev`, `libjson-c-dev`, `libssl-dev`, and an initialized `pcr-oracle` submodule):
+
 ```
-sudo make install
+git submodule update --init
+dpkg-buildpackage -b -us -uc
+sudo apt install ../efi-measured-boot_*.deb
 ```
 
-Then follow further instructions from the install.
+## Activation
 
-## Future Work
+Once the package is installed:
 
-Eventually, I intend to turn this into an official Debian package, though manual steps to prep the system will likely still be required. While it is technically possible to automate the migration to an encrypted root with LUKS2 metadata, there are enough boot chain variations in Debian systems that a user who runs into an uncovered outlying failure case needs sufficient knowledge to be able to recover manually.
+1. **Check system readiness** (optional but recommended):
+
+   ```
+   sudo emboot-prepare
+   ```
+
+   This guided wizard verifies all prerequisites and can automate a few safe steps
+   (such as installing grub-efi and setting `GRUB_ENABLE_CRYPTODISK=y`). Address any
+   blocking issues it reports before continuing.
+
+2. **Review configuration** (optional):
+
+   ```
+   $EDITOR /etc/efi-measured-boot/config
+   ```
+
+   The generated defaults suit most Debian systems. You may want to adjust
+   `OS_SHORT_NAME`, `SEAL_PCRS`, or `KERNEL_PARAMS`.
+
+3. **Run first-time setup**:
+
+   ```
+   sudo emboot-setup
+   ```
+
+   This modifies `/etc/crypttab` to use the emboot unseal keyscript, provisions the
+   TPM monotonic anti-downgrade counter, adds a LUKS key for the root device, and sets
+   the next EFI boot entry to the emboot loader.
+
+4. **Reboot**:
+
+   ```
+   sudo reboot
+   ```
+
+   On the first boot via the emboot EFI chain, the system automatically seals the LUKS
+   passphrase to the current TPM PCR values. Subsequent kernel installs and removals are
+   handled automatically by the package's kernel hooks.
 
 ## Acknowledgements
 
