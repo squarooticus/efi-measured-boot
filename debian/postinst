@@ -1,0 +1,35 @@
+#!/bin/sh
+set -e
+
+CONFIGDIR=/etc/efi-measured-boot
+APPDIR=/usr/share/efi-measured-boot
+
+case "$1" in
+    configure)
+        . /etc/os-release
+        OS_SHORT_NAME=${ID:-linux}
+
+        mkdir -p "$CONFIGDIR"
+        cfgfile="$CONFIGDIR/config"
+        if [ -e "$cfgfile" ]; then
+            cfgfile="$cfgfile.new"
+            echo "efi-measured-boot: existing config preserved; examine $cfgfile and merge into place" >&2
+        fi
+
+        cat >"$cfgfile" <<EOF
+EFI_MOUNT=/boot/efi
+OS_SHORT_NAME='$OS_SHORT_NAME'
+COUNTER_HANDLE=0x1926001
+SEAL_PCRS=0,2,4
+LUKS_KEY=/etc/keys/root-emboot.key
+KERNEL_PARAMS="ro add_efi_memmap"
+UPDATE_BOOT_ORDER=y
+APPDIR='$APPDIR'
+#VERBOSE=<non-zero for verbose output; 3=info, 4=debug, 5=debug+detail>
+#UNSEAL_PAUSE=<seconds to sleep after unseal, for debugging>
+#EFI_STUB=<alternate EFI stub path>
+EOF
+        ;;
+esac
+
+#DEBHELPER#

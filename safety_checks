@@ -1,14 +1,18 @@
 #! /bin/bash
 
-SYSTEMD_STUB=/usr/lib/systemd/boot/efi/linuxx64.efi.stub
-CHECKS=( root arch binaries packages cryptsetup_version no_separate_boot mounted_efi root_luks systemd_stub tpm pcr_oracle )
+# Runtime safety checks for emboot-setup.
+# Dependency checks (packages, binaries, versions) are handled by Debian
+# packaging and are not repeated here.
 
-APPDIR=.
-. ./bash_functions
+CHECKS=( root arch no_separate_boot mounted_efi root_luks tpm )
 
 if [ -e /etc/efi-measured-boot/config ]; then
     . /etc/efi-measured-boot/config
 fi
+# Fall back to the script's own directory (for running from the repo before install)
+APPDIR=${APPDIR:-/usr/share/efi-measured-boot}
+[ -r "$APPDIR/bash_functions" ] || APPDIR=$(cd "$(dirname "$0")" && pwd)
+. "$APPDIR/bash_functions"
 
 check_root() {
     if test "$(id -u)" != 0; then
@@ -53,19 +57,11 @@ check_root_luks() {
         return 1
     fi
     if ! cryptsetup isLuks "${cryptdev[1]}" --type luks2; then
-        echo "Root must be hosted on a LUKS2 partition"
+        echo "Root must be hosted on a LUKS2 partition" >&2
         return 1
     fi
     if (( $(cryptsetup luksDump "${cryptdev[1]}" --dump-json-metadata | jq -r '.keyslots | to_entries | map(.value | select(.kdf.type == "pbkdf2") | 1) | length') == 0 )); then
-        echo "At least one LUKS passphrase must employ pbkdf2 KDF for GRUB2 recovery purposes"
-        return 1
-    fi
-}
-
-check_systemd_stub() {
-    [ -z "$EFI_STUB" ] || return 0
-    if ! test -r "$SYSTEMD_STUB"; then
-        echo "systemd EFI stub $SYSTEMD_STUB not available: install systemd-boot-efi" >&2
+        echo "At least one LUKS passphrase must employ pbkdf2 KDF for GRUB2 recovery purposes" >&2
         return 1
     fi
 }
@@ -73,83 +69,6 @@ check_systemd_stub() {
 check_tpm() {
     if ! tpm2_pcrread -Q 2>/dev/null; then
         echo "TPM does not appear to be available or working" >&2
-        return 1
-    fi
-}
-
-check_packages() {
-    if (( $(dpkg-query -W -f='${Status}\n' cryptsetup-initramfs 2>/dev/null | grep -c "ok installed") < 1 )); then
-        echo "cryptsetup-initramfs required" >&2
-        return 1
-    fi
-    if (( $(dpkg-query -W -f='${Status}\n' initramfs-tools 2>/dev/null | grep -c "ok installed") < 1 )); then
-        echo "initramfs-tools required (dracut is not supported)" >&2
-        return 1
-    fi
-    for pkg in json-c tss2-esys; do
-        if ! pkg-config --exists $pkg; then
-            echo "Dev package for $pkg is required to build pcr-oracle" >&2
-            return 1
-        fi
-    done
-}
-
-check_binaries() {
-    for bin in \
-        awk \
-        basename \
-        cryptsetup \
-        dd \
-        diff \
-        dirname \
-        efibootmgr \
-        gawk \
-        grep \
-        jq \
-        lsblk \
-        mount \
-        objcopy \
-        sed \
-        sgdisk \
-        sort \
-        strings \
-        tpm2_create \
-        tpm2_createprimary \
-        tpm2_flushcontext \
-        tpm2_load \
-        tpm2_nvdefine \
-        tpm2_nvincrement \
-        tpm2_nvread \
-        tpm2_nvreadpublic \
-        tpm2_pcrread \
-        tpm2_policynv \
-        tpm2_policypcr \
-        tpm2_shutdown \
-        tpm2_startauthsession \
-        tpm2_unseal \
-        tr \
-        uniq \
-        update-initramfs \
-
-    do
-        if [ -z "$(type -Pt "$bin")" ]; then
-            echo "Cannot find $bin in path" >&2
-            return 1
-        fi
-    done
-}
-
-check_cryptsetup_version() {
-    cver=$(cryptsetup -V | awk '{print $2;}')
-    if compare_versions "$cver" 2.4.0 || (( $? == 1 )); then
-        echo "cryptsetup version must be >= 2.4.0 (for --dump-json-metadata support)" >&2
-        return 1
-    fi
-}
-
-check_pcr_oracle() {
-    if [ ! -r pcr-oracle/configure ]; then
-        echo "pcr-oracle/configure does not exist; did you forget to clone --recursive?" >&2
         return 1
     fi
 }

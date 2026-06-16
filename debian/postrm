@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    purge)
+        rm -rf /etc/efi-measured-boot
+        rm -f /etc/crypttab.pre_emboot
+        ;;
+esac
+
+#DEBHELPER#

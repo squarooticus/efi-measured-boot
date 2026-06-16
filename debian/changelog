@@ -1,0 +1,5 @@
+efi-measured-boot (0.1-1) unstable; urgency=low
+
+  * Initial Debian packaging.
+
+ -- Kyle Rose <krose@krose.org>  Sun, 15 Jun 2026 00:00:00 +0000
