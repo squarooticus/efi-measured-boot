@@ -273,13 +273,13 @@ EOF
 
 do_install_grub_efi() {
     echo "" >&2
-    status "$INFO" "Will install grub-efi-amd64 and grub-efi-amd64-signed"
+    status "$INFO" "Will install grub-efi-amd64"
     echo "         This will uninstall grub-pc." >&2
     if ! ask_confirm "Install grub-efi?"; then
         echo "         Skipped." >&2
         return
     fi
-    apt-get install --yes grub-efi-amd64 grub-efi-amd64-signed
+    apt-get install --yes grub-efi-amd64
 
     # Find the boot disk (parent of the root device)
     local rootdev
