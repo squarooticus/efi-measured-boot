@@ -135,6 +135,31 @@ if [ -e /etc/efi-measured-boot/config.new ]; then
     exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Clean up legacy /usr/local install if present
+# ---------------------------------------------------------------------------
+
+legacy_items=()
+[ -e /usr/local/sbin/update-emboot ] && legacy_items+=( /usr/local/sbin/update-emboot )
+[ -e /usr/local/share/efi-measured-boot ] && legacy_items+=( /usr/local/share/efi-measured-boot )
+
+if [ ${#legacy_items[@]} -gt 0 ]; then
+    echo "" >&2
+    echo "Legacy /usr/local installation found:" >&2
+    for item in "${legacy_items[@]}"; do
+        echo "  $item" >&2
+    done
+    echo "" >&2
+    read -r -p "Remove these now? [y/N] " reply
+    if [[ $reply == [yY] ]]; then
+        rm -rf "${legacy_items[@]}"
+        echo "Removed." >&2
+    else
+        echo "Skipped. You may remove them manually later." >&2
+    fi
+    echo "" >&2
+fi
+
 rootdevinfo=( $(get_device_info /) )
 cryptdev=( $(get_crypttab_entry "${rootdevinfo[1]}") )
 
