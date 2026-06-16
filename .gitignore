@@ -1,0 +1,19 @@
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/*.debhelper
+debian/*.debhelper.log
+debian/*.substvars
+
+# Built packages (one directory up)
+../*.deb
+../*.buildinfo
+../*.changes
+../*.dsc
+../*.tar.*
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Claude Code auto-memory system
+memory/
