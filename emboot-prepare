@@ -141,8 +141,12 @@ EOF
     local esp_free_mib=$(( esp_free_bytes / 1048576 ))
 
     if (( esp_size_bytes < 500 * 1048576 )); then
-        status "$WARN" "ESP is ${esp_size_mib}MiB (500MiB+ recommended for two kernel blobs)"
-        warnings+=( "ESP may be too small (${esp_size_mib}MiB); monitor for space issues" )
+        status "$FAIL" "ESP is ${esp_size_mib}MiB; 500MiB minimum required for two kernel blobs"
+        blocking_issues+=( "ESP is too small (${esp_size_mib}MiB); 500MiB minimum required" )
+        return 1
+    elif (( esp_size_bytes < 1024 * 1048576 )); then
+        status "$WARN" "ESP is ${esp_size_mib}MiB (${esp_free_mib}MiB free); consider expanding to 1GiB to accommodate future kernel/initrd growth"
+        warnings+=( "ESP is under 1GiB (${esp_size_mib}MiB); may fill as kernels and initrds grow" )
     else
         status "$PASS" "ESP mounted at /boot/efi (${esp_size_mib}MiB, ${esp_free_mib}MiB free)"
     fi
