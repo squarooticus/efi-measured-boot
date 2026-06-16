@@ -215,6 +215,20 @@ EOF
 
     status "$PASS" "Root device $cryptdev uses LUKS2"
 
+    local crypt_count
+    crypt_count=$(lsblk -s "${rootdevinfo[1]}" -o TYPE -n -r | grep -c '^crypt$' || true)
+    if ((crypt_count > 1)); then
+        status "$FAIL" "Root device has $crypt_count independent dm-crypt layers (only one is supported)"
+        blocking_issues+=( "Multiple independent LUKS layers in root device ancestry are unsupported" )
+        cat <<'EOF' | indent
+Restructure storage so a single LUKS partition wraps all physical media:
+  Supported:  /dev/sdaX → LUKS → LVM PV → VG → root LV
+  Supported:  /dev/sdaX + /dev/sdbX → mdraid → LUKS → LVM → root
+  Unsupported: separate LUKS on each PV / RAID member
+EOF
+        return 1
+    fi
+
     local pbkdf2_count
     pbkdf2_count=$(cryptsetup luksDump "$cryptdev" --dump-json-metadata 2>/dev/null | \
                    jq -r '.keyslots | to_entries |
@@ -265,7 +279,7 @@ do_install_grub_efi() {
 
     # Find the boot disk (parent of the root device)
     local rootdev
-    rootdev=$(lsblk -n -o PATH,MOUNTPOINT -r | awk '$2 == "/" { print $1; }' | head -1)
+    rootdev=$(get_device_info / | awk '{print $2}')
     local bootdisk
     bootdisk=$(lsblk -s -n -o NAME -r "$rootdev" | tail -1)
     bootdisk="/dev/$bootdisk"
