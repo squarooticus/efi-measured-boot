@@ -8,6 +8,8 @@ override_dh_auto_build:
 
 override_dh_auto_install:
 	$(MAKE) -C pcr-oracle install DESTDIR=$(CURDIR)/debian/efi-measured-boot
+	mv $(CURDIR)/debian/efi-measured-boot/usr/bin/pcr-oracle \
+	   $(CURDIR)/debian/efi-measured-boot/usr/share/efi-measured-boot/pcr-oracle
 
 override_dh_auto_test:
 
