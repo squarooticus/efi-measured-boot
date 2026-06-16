@@ -1,0 +1,21 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|purge)
+        if grep -q 'emboot_unseal\.sh' /etc/crypttab 2>/dev/null; then
+            # Three passes cover all positions: trailing, leading, and sole option.
+            sed -i 's|,keyscript=[^, ]*emboot_unseal\.sh||g' /etc/crypttab
+            sed -i 's|keyscript=[^, ]*emboot_unseal\.sh,||g' /etc/crypttab
+            sed -i 's|keyscript=[^, ]*emboot_unseal\.sh||g' /etc/crypttab
+            echo "efi-measured-boot: keyscript removed from /etc/crypttab" >&2
+        fi
+        if [ -e /etc/efi-measured-boot/config ]; then
+            . /etc/efi-measured-boot/config
+            echo "  EFI entries and LUKS tokens remain (harmless without the keyscript)" >&2
+            echo "  LUKS key at ${LUKS_KEY} has NOT been removed" >&2
+        fi
+        ;;
+esac
+
+#DEBHELPER#

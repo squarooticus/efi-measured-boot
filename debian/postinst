@@ -11,24 +11,38 @@ case "$1" in
 
         mkdir -p "$CONFIGDIR"
         cfgfile="$CONFIGDIR/config"
-        if [ -e "$cfgfile" ]; then
-            cfgfile="$cfgfile.new"
-            echo "efi-measured-boot: existing config preserved; examine $cfgfile and merge into place" >&2
-        fi
-
-        cat >"$cfgfile" <<EOF
+        if [ -e "$cfgfile" ] && grep -q 'APPDIR=.*/usr/local' "$cfgfile" 2>/dev/null; then
+            echo "efi-measured-boot: migrating config from /usr/local to /usr" >&2
+            sed -i "s|APPDIR=.*|APPDIR='$APPDIR'|" "$cfgfile"
+            if grep -q '/usr/local/share/efi-measured-boot/emboot_unseal\.sh' /etc/crypttab 2>/dev/null; then
+                sed -i 's|/usr/local/share/efi-measured-boot/emboot_unseal\.sh|/usr/share/efi-measured-boot/emboot_unseal.sh|g' \
+                    /etc/crypttab
+                echo "efi-measured-boot: updated keyscript path in /etc/crypttab" >&2
+            fi
+            echo "efi-measured-boot: run 'update-initramfs -u -k all' to rebuild initramfs with new paths" >&2
+        else
+            if [ -e "$cfgfile" ]; then
+                cfgfile="$cfgfile.new"
+                echo "efi-measured-boot: existing config preserved; examine $cfgfile and merge into place" >&2
+            fi
+            KERNEL_PARAMS="$(sed 's|BOOT_IMAGE=[^ ]*||g; s|initrd=[^ ]*||g' /proc/cmdline | tr -s ' ' | sed 's/^ //; s/ $//')"
+            cat >"$cfgfile" <<EOF
 EFI_MOUNT=/boot/efi
 OS_SHORT_NAME='$OS_SHORT_NAME'
 COUNTER_HANDLE=0x1926001
 SEAL_PCRS=0,2,4
 LUKS_KEY=/etc/keys/root-emboot.key
-KERNEL_PARAMS="ro add_efi_memmap"
+KERNEL_PARAMS="$KERNEL_PARAMS"
 UPDATE_BOOT_ORDER=y
 APPDIR='$APPDIR'
 #VERBOSE=<non-zero for verbose output; 3=info, 4=debug, 5=debug+detail>
 #UNSEAL_PAUSE=<seconds to sleep after unseal, for debugging>
 #EFI_STUB=<alternate EFI stub path>
 EOF
+            echo "efi-measured-boot: KERNEL_PARAMS was derived from /proc/cmdline." >&2
+            echo "  Review KERNEL_PARAMS in $cfgfile before running emboot-setup --" >&2
+            echo "  confirm these are the parameters you want baked into every boot entry." >&2
+        fi
         ;;
 esac
 
