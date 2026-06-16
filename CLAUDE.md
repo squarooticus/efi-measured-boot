@@ -15,7 +15,8 @@ This is a Debian package for TPM 2.0-measured EFI boot with automatic, non-inter
 ## Building the package
 
 ```
-make deb            # runs dpkg-buildpackage -b -us -uc
+git submodule update --init
+dpkg-buildpackage -b -us -uc
 ```
 
 Requires build-depends from `debian/control`: `gcc`, `make`, `pkg-config`, `libtss2-dev`, `libjson-c-dev`, `libssl-dev`. The build compiles `pcr-oracle` from the submodule (must be initialized: `git submodule update --init`).
@@ -43,13 +44,12 @@ Subsequent kernel installs/removals are handled automatically by hooks in `posti
 ## Key scripts and their roles
 
 - **`functions`** — POSIX sh library sourced in initramfs context. Contains logging, TPM wrappers (`seal_data`, `unseal_data`), LUKS token management, EFI loader creation (`create_loader`).
-- **`bash_functions`** — Bash library for the normal root context. Extends `functions` with `compare_versions`, `provision_counter`, LUKS metadata caching, EFI variable management, and high-level operations (`install_loaders`, `update_tokens`, `seal_and_create_token`).
+- **`bash_functions`** — Bash library for the normal root context. Extends `functions` with `provision_counter`, LUKS metadata caching, EFI variable management, and high-level operations (`install_loaders`, `update_tokens`, `seal_and_create_token`).
 - **`update-emboot`** — Main entry point for ongoing maintenance; called by kernel hooks on install/remove. Installed to `/usr/sbin/update-emboot`.
 - **`emboot-setup`** — First-time setup script: modifies crypttab, provisions TPM counter, generates LUKS key, enables firstboot service, rebuilds initrd, sets next-boot.
 - **`emboot-firstboot`** — Called by `emboot-firstboot.service` on first boot from the emboot chain; runs `update-emboot -s` once and disables itself.
 - **`emboot-prepare`** — Guided wizard: checks system readiness (arch, UEFI mode, GRUB, ESP, LUKS2, TPM), automates safe steps (grub-efi install, GRUB_ENABLE_CRYPTODISK), and prints instructions for risky steps.
 - **`emboot_unseal.sh`** — Initramfs keyscript (POSIX sh); sources `functions` (not `bash_functions`); tries TPM unseal and falls back to interactive passphrase.
-- **`safety_checks`** — Runtime-only checks (root, arch, LUKS2, TPM, boot layout); called internally by `emboot-setup`. Dependency checks are handled by Debian packaging.
 
 ## Debian package structure
 
