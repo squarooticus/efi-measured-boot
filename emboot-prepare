@@ -6,6 +6,11 @@
 
 set -e
 
+APPDIR=/usr/share/efi-measured-boot
+[ -e /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
+APPDIR=${APPDIR:-/usr/share/efi-measured-boot}
+. "$APPDIR/bash_functions"
+
 PASS="[PASS]"
 FAIL="[FAIL]"
 WARN="[WARN]"
@@ -165,21 +170,17 @@ EOF
 
 check_luks() {
     luks_ok=
-    local rootdev
-    rootdev=$(lsblk -n -o PATH,MOUNTPOINT -r | awk '$2 == "/" { print $1; }' | head -1)
-    if [ -z "$rootdev" ]; then
+
+    local rootdevinfo
+    rootdevinfo=( $(get_device_info /) ) || {
         status "$FAIL" "Cannot determine root device"
         blocking_issues+=( "Cannot determine root block device" )
         return 1
-    fi
+    }
 
-    # Walk up the device stack to find the crypto device
-    local cryptdev
-    cryptdev=$(lsblk -s -n -o TYPE,PATH -r "$rootdev" 2>/dev/null | \
-               awk '$1 == "crypt" { print $2; }' | head -1)
-
-    if [ -z "$cryptdev" ]; then
-        status "$FAIL" "Root device ($rootdev) does not appear to be on a dm-crypt device"
+    local cryptdev_entry
+    cryptdev_entry=( $(get_crypttab_entry "${rootdevinfo[1]}") ) || {
+        status "$FAIL" "Root device has no crypttab entry — root is not LUKS-encrypted"
         blocking_issues+=( "Root must be on a LUKS2 dm-crypt device" )
         cat <<'EOF' | indent
 To encrypt an unencrypted root (WARNING: back up first; do from a live USB):
@@ -188,7 +189,9 @@ To encrypt an unencrypted root (WARNING: back up first; do from a live USB):
 Then update /etc/crypttab and rebuild the initramfs.
 EOF
         return 1
-    fi
+    }
+
+    local cryptdev=${cryptdev_entry[1]}   # raw LUKS block device (e.g. /dev/sda2)
 
     if ! cryptsetup isLuks "$cryptdev" 2>/dev/null; then
         status "$FAIL" "$cryptdev does not appear to be a LUKS device"
@@ -196,12 +199,11 @@ EOF
         return 1
     fi
 
-    local luks_version
-    luks_version=$(cryptsetup luksDump "$cryptdev" 2>/dev/null | \
-                   awk '/^Version:/ { print $2; }' | head -1)
-
-    if [ "$luks_version" != "2" ]; then
-        status "$FAIL" "Root is LUKS$luks_version (LUKS2 required)"
+    if ! cryptsetup isLuks "$cryptdev" --type luks2 2>/dev/null; then
+        local luks_version
+        luks_version=$(cryptsetup luksDump "$cryptdev" 2>/dev/null | \
+                       awk '/^Version:/ { print $2; }' | head -1)
+        status "$FAIL" "Root is LUKS${luks_version:-?} (LUKS2 required)"
         blocking_issues+=( "Root LUKS device must use LUKS2 metadata (currently LUKS${luks_version})" )
         cat <<'EOF' | indent
 To convert LUKS1 to LUKS2 (can be done from initramfs shell):
@@ -213,7 +215,6 @@ EOF
 
     status "$PASS" "Root device $cryptdev uses LUKS2"
 
-    # Check for PBKDF2 keyslot (required for GRUB recovery)
     local pbkdf2_count
     pbkdf2_count=$(cryptsetup luksDump "$cryptdev" --dump-json-metadata 2>/dev/null | \
                    jq -r '.keyslots | to_entries |
