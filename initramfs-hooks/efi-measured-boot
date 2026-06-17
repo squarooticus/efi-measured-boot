@@ -1,4 +1,8 @@
 #! /bin/sh
+
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Kyle R. Rose
+
 PREREQ=""
 prereqs()
 {

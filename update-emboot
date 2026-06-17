@@ -1,5 +1,8 @@
 #! /bin/bash
 
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Kyle R. Rose
+
 exec 3>&1 >&2
 
 cmd=$0

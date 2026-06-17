@@ -1,5 +1,8 @@
 #! /bin/bash
 
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Kyle R. Rose
+
 . "${APPDIR:-/APPDIR-not-set}"/functions
 
 # Shell quotes with an attempt to make the result human-readable.
