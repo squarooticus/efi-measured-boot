@@ -74,6 +74,42 @@ EOF
     status "$PASS" "Booted in UEFI mode"
 }
 
+check_gpt() {
+    local rootdev
+    rootdev=$(get_device_info / | awk '{print $2}') || {
+        status "$FAIL" "Cannot determine root device"
+        blocking_issues+=( "Cannot determine root block device" )
+        return 1
+    }
+
+    local bootdisk_name
+    bootdisk_name=$(lsblk -s -n -o NAME,TYPE -r "$rootdev" \
+                    | awk '$2=="disk"{print $1}' | tail -1)
+    if [ -z "$bootdisk_name" ]; then
+        status "$FAIL" "Cannot determine boot disk"
+        blocking_issues+=( "Cannot determine boot disk partition table type" )
+        return 1
+    fi
+    local bootdisk="/dev/$bootdisk_name"
+
+    local pttype
+    pttype=$(lsblk -d -n -o PTTYPE "$bootdisk" 2>/dev/null)
+    if [ "$pttype" != "gpt" ]; then
+        status "$FAIL" "Boot disk $bootdisk uses ${pttype:-unknown} partition table (GPT required)"
+        blocking_issues+=( "Boot disk $bootdisk must use GPT (found: ${pttype:-unknown})" )
+        cat <<'EOF' | indent
+To fix (requires a live USB — back up data first):
+  1. Convert MBR to GPT with sgdisk (gdisk package):
+       sgdisk -g /dev/sda          # non-destructive MBR→GPT conversion
+  2. Create an EFI System Partition if one does not exist (type EF00, ≥500MiB)
+  3. Reinstall grub-efi: grub-install /dev/sda && update-grub
+  4. Reboot and verify UEFI boot before continuing
+EOF
+        return 1
+    fi
+    status "$PASS" "Boot disk $bootdisk uses GPT"
+}
+
 # Returns 0 if grub-efi is the active bootloader, 1 otherwise.
 # Sets grub_efi_installed and grub_pc_installed.
 check_grub() {
@@ -323,6 +359,7 @@ echo "" >&2
 check_root
 check_arch || true
 check_uefi_mode || true
+check_gpt || true
 check_grub || true
 check_esp || true
 check_boot_on_root || true
