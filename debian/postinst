@@ -25,7 +25,7 @@ case "$1" in
                 cfgfile="$cfgfile.new"
                 echo "efi-measured-boot: existing config preserved; examine $cfgfile and merge into place" >&2
             fi
-            KERNEL_PARAMS="$(sed 's|BOOT_IMAGE=[^ ]*||g; s|initrd=[^ ]*||g' /proc/cmdline | tr -s ' ' | sed 's/^ //; s/ $//')"
+            KERNEL_PARAMS="$(sed 's@\(BOOT_IMAGE\|root\|cryptdevice\|initrd\)=[^ ]*@@g' /proc/cmdline | tr -s ' ' | sed 's/^ *//; s/ *$//')"
             cat >"$cfgfile" <<EOF
 EFI_MOUNT=/boot/efi
 OS_SHORT_NAME='$OS_SHORT_NAME'
