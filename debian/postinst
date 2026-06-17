@@ -12,18 +12,21 @@ case "$1" in
         mkdir -p "$CONFIGDIR"
         cfgfile="$CONFIGDIR/config"
         if [ -e "$cfgfile" ] && grep -q 'APPDIR=.*/usr/local' "$cfgfile" 2>/dev/null; then
-            echo "efi-measured-boot: migrating config from /usr/local to /usr" >&2
+            echo "efi-measured-boot: migrating config from /usr/local install" >&2
             sed -i "s|APPDIR=.*|APPDIR='$APPDIR'|" "$cfgfile"
             if grep -q '/usr/local/share/efi-measured-boot/emboot_unseal\.sh' /etc/crypttab 2>/dev/null; then
                 sed -i 's|/usr/local/share/efi-measured-boot/emboot_unseal\.sh|/usr/share/efi-measured-boot/emboot_unseal.sh|g' \
                     /etc/crypttab
                 echo "efi-measured-boot: updated keyscript path in /etc/crypttab" >&2
             fi
-            echo "efi-measured-boot: run 'update-initramfs -u -k all' to rebuild initramfs with new paths" >&2
+            if [ -e "$cfgfile.new" ]; then
+                echo "efi-measured-boot: removing vestigial $cfgfile.new" >&2
+                rm -f "$cfgfile.new"
+            fi
         else
             if [ -e "$cfgfile" ]; then
                 cfgfile="$cfgfile.new"
-                echo "efi-measured-boot: existing config preserved; examine $cfgfile and merge into place" >&2
+                echo "efi-measured-boot: existing config preserved; examine $cfgfile and either delete or merge into place" >&2
             fi
             KERNEL_PARAMS="$(sed 's@\(BOOT_IMAGE\|root\|cryptdevice\|initrd\)=[^ ]*@@g' /proc/cmdline | tr -s ' ' | sed 's/^ *//; s/ *$//')"
             cat >"$cfgfile" <<EOF
@@ -39,9 +42,7 @@ APPDIR='$APPDIR'
 #UNSEAL_PAUSE=<seconds to sleep after unseal, for debugging>
 #EFI_STUB=<alternate EFI stub path>
 EOF
-            echo "efi-measured-boot: KERNEL_PARAMS was derived from /proc/cmdline." >&2
-            echo "  Review KERNEL_PARAMS in $cfgfile before running emboot-setup --" >&2
-            echo "  confirm these are the parameters you want baked into every boot entry." >&2
+            echo "efi-measured-boot: KERNEL_PARAMS in $cfgfile derived from /proc/cmdline" >&2
         fi
         ;;
 esac

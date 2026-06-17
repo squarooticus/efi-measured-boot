@@ -131,7 +131,8 @@ run_checks
 
 if [ -e /etc/efi-measured-boot/config.new ]; then
     echo "A new config template is waiting at /etc/efi-measured-boot/config.new" >&2
-    echo "Review it, merge any changes into /etc/efi-measured-boot/config, then re-run emboot-setup." >&2
+    echo "Either merge any new settings into /etc/efi-measured-boot/config and delete config.new," >&2
+    echo "or delete config.new if no changes are needed. Then re-run emboot-setup." >&2
     exit 1
 fi
 
