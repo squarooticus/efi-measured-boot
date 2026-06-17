@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Kyle R. Rose
+
 # Guided wizard that checks system readiness for efi-measured-boot and
 # automates the safe preparation steps (grub-efi install, GRUB config).
 # Risky steps (partition changes, encryption) are explained but not performed.

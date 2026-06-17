@@ -1,5 +1,8 @@
 #! /bin/sh
 
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Kyle R. Rose
+
 EMBOOT_VERBOSE=${EMBOOT_VERBOSE:-${VERBOSE:-0}}
 EMBOOT_ADD_TO_COUNTER=0
 

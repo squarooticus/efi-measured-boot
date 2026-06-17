@@ -1,3 +1,8 @@
+The following license applies to the efi-measured-boot software itself.
+pcr-oracle, whether packaged separately or alongside efi-measured-boot, has its
+own license terms.
+
+
 MIT License (also available at <https://spdx.org/licenses/MIT>)
 
 (c) 2022 Kyle Rose <krose@krose.org>

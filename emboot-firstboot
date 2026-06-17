@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Kyle R. Rose
+
 set -e
 
 . /etc/efi-measured-boot/config
