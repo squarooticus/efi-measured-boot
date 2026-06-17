@@ -6,7 +6,7 @@ emboot-setup                                                 usr/sbin/
 emboot-firstboot                                             usr/sbin/
 emboot-prepare                                               usr/sbin/
 initramfs-hooks/efi-measured-boot                            etc/initramfs-tools/hooks/
-kernel-hooks/efi-measured-boot                               etc/kernel/postinst.d/zz-efi-measured-boot
-kernel-hooks/efi-measured-boot                               etc/kernel/postrm.d/zz-efi-measured-boot
-kernel-hooks/efi-measured-boot                               etc/initramfs/post-update.d/zz-efi-measured-boot
+kernel-hooks/zz-efi-measured-boot                            etc/kernel/postinst.d/
+kernel-hooks/zz-efi-measured-boot                            etc/kernel/postrm.d/
+kernel-hooks/zz-efi-measured-boot                            etc/initramfs/post-update.d/
 debian/emboot-firstboot.service                              lib/systemd/system/

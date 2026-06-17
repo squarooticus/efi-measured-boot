@@ -90,7 +90,7 @@ Each loader is a PE binary (`objcopy` embedding `.osrel`, `.krel`, `.cmdline`, `
 
 ## Kernel/initrd hooks
 
-`kernel-hooks/efi-measured-boot` is installed as:
+`kernel-hooks/zz-efi-measured-boot` is installed as:
 - `/etc/kernel/postinst.d/zz-efi-measured-boot` — runs `update-emboot` on kernel install
 - `/etc/kernel/postrm.d/zz-efi-measured-boot` — runs `update-emboot -r -k <krel>` + increments counter on kernel removal
 - `/etc/initramfs/post-update.d/zz-efi-measured-boot` — runs `update-emboot` when initrd changes
