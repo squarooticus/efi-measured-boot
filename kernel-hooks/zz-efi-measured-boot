@@ -5,6 +5,7 @@ cmd=$0
 arg1=$1
 
 which update-emboot >/dev/null 2>&1 || exit 0
+[ -e /etc/efi-measured-boot/configured ] || exit 0
 
 if type systemd-detect-virt >/dev/null 2>&1 &&
    systemd-detect-virt --quiet --container; then

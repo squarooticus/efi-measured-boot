@@ -12,6 +12,8 @@ case $1 in
 		;;
 esac
 
+[ -e /etc/efi-measured-boot/configured ] || exit 0
+
 . /usr/share/initramfs-tools/hook-functions
 
 for i in createprimary flushcontext load nvread pcrread policynv policypcr startauthsession unseal; do

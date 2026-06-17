@@ -178,8 +178,11 @@ revert_changes() {
         mv -f /etc/crypttab.pre_emboot /etc/crypttab
     fi
     rm -f /etc/efi-measured-boot/pending-seal
+    rm -f /etc/efi-measured-boot/configured
 }
 trap 'rc=$?; trap - EXIT; [ "$rc" -eq 0 ] && exit 0; revert_changes' EXIT
+
+touch /etc/efi-measured-boot/configured
 
 echo "Modifying /etc/crypttab" >&2
 awk -v newopts="$cryptopts" \
