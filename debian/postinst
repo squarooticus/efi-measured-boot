@@ -2,7 +2,6 @@
 set -e
 
 CONFIGDIR=/etc/efi-measured-boot
-APPDIR=/usr/share/efi-measured-boot
 
 case "$1" in
     configure)
@@ -11,23 +10,14 @@ case "$1" in
 
         mkdir -p "$CONFIGDIR"
         cfgfile="$CONFIGDIR/config"
-        if [ -e "$cfgfile" ] && grep -q 'APPDIR=.*/usr/local' "$cfgfile" 2>/dev/null; then
-            echo "efi-measured-boot: migrating config from /usr/local install" >&2
-            sed -i "s|APPDIR=.*|APPDIR='$APPDIR'|" "$cfgfile"
-            if grep -q '/usr/local/share/efi-measured-boot/emboot_unseal\.sh' /etc/crypttab 2>/dev/null; then
-                sed -i 's|/usr/local/share/efi-measured-boot/emboot_unseal\.sh|/usr/share/efi-measured-boot/emboot_unseal.sh|g' \
-                    /etc/crypttab
-                echo "efi-measured-boot: updated keyscript path in /etc/crypttab" >&2
-            fi
-            if [ -e "$cfgfile.new" ]; then
-                echo "efi-measured-boot: removing vestigial $cfgfile.new" >&2
-                rm -f "$cfgfile.new"
-            fi
-        else
-            if [ -e "$cfgfile" ]; then
-                cfgfile="$cfgfile.new"
-                echo "efi-measured-boot: existing config preserved; examine $cfgfile and either delete or merge into place" >&2
-            fi
+
+        if grep -q '/usr/local/share/efi-measured-boot/emboot_unseal\.sh' /etc/crypttab 2>/dev/null; then
+            sed -i 's|/usr/local/share/efi-measured-boot/emboot_unseal\.sh|/usr/share/efi-measured-boot/emboot_unseal.sh|g' \
+                /etc/crypttab
+            echo "efi-measured-boot: updated keyscript path in /etc/crypttab" >&2
+        fi
+
+        if [ ! -e "$cfgfile" ]; then
             KERNEL_PARAMS="$(sed 's@\(BOOT_IMAGE\|root\|cryptdevice\|initrd\)=[^ ]*@@g' /proc/cmdline | tr -s ' ' | sed 's/^ *//; s/ *$//')"
             cat >"$cfgfile" <<EOF
 EFI_MOUNT=/boot/efi
@@ -37,12 +27,12 @@ SEAL_PCRS=0,2,4
 LUKS_KEY=/etc/keys/root-emboot.key
 KERNEL_PARAMS="$KERNEL_PARAMS"
 UPDATE_BOOT_ORDER=y
-APPDIR='$APPDIR'
 #VERBOSE=<non-zero for verbose output; 3=info, 4=debug, 5=debug+detail>
 #UNSEAL_PAUSE=<seconds to sleep after unseal, for debugging>
 #EFI_STUB=<alternate EFI stub path>
 EOF
-            echo "efi-measured-boot: KERNEL_PARAMS in $cfgfile derived from /proc/cmdline" >&2
+            echo "efi-measured-boot: wrote $cfgfile" >&2
+            echo "efi-measured-boot: KERNEL_PARAMS derived from /proc/cmdline" >&2
         fi
         ;;
 esac

@@ -31,9 +31,9 @@ copy_exec /usr/bin/jq /usr/bin
 mkdir -p "$DESTDIR"/etc/efi-measured-boot
 cp /etc/efi-measured-boot/config "$DESTDIR"/etc/efi-measured-boot/
 
-. /etc/efi-measured-boot/config
-mkdir -p "$DESTDIR/$APPDIR"
-cp "$APPDIR"/functions "$DESTDIR/$APPDIR/"
+EMBOOT_SHARE=/usr/share/efi-measured-boot
+mkdir -p "$DESTDIR/$EMBOOT_SHARE"
+cp "$EMBOOT_SHARE/functions" "$DESTDIR/$EMBOOT_SHARE/"
 
 force_load tpm_tis
 force_load tpm_crb

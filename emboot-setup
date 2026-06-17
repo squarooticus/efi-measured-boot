@@ -127,17 +127,11 @@ add_keyscript_option() {
 # Main
 # ---------------------------------------------------------------------------
 
+EMBOOT_SHARE=/usr/share/efi-measured-boot
 . /etc/efi-measured-boot/config
-. "$APPDIR/bash_functions"
+. "$EMBOOT_SHARE/bash_functions"
 
 run_checks
-
-if [ -e /etc/efi-measured-boot/config.new ]; then
-    echo "A new config template is waiting at /etc/efi-measured-boot/config.new" >&2
-    echo "Either merge any new settings into /etc/efi-measured-boot/config and delete config.new," >&2
-    echo "or delete config.new if no changes are needed. Then re-run emboot-setup." >&2
-    exit 1
-fi
 
 # ---------------------------------------------------------------------------
 # Clean up legacy /usr/local install if present

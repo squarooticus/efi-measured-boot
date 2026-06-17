@@ -9,10 +9,9 @@
 
 set -e
 
-APPDIR=/usr/share/efi-measured-boot
+EMBOOT_SHARE=/usr/share/efi-measured-boot
 [ -e /etc/efi-measured-boot/config ] && . /etc/efi-measured-boot/config
-APPDIR=${APPDIR:-/usr/share/efi-measured-boot}
-. "$APPDIR/bash_functions"
+. "$EMBOOT_SHARE/bash_functions"
 
 PASS="[PASS]"
 FAIL="[FAIL]"

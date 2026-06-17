@@ -5,8 +5,9 @@
 
 set -e
 
+EMBOOT_SHARE=/usr/share/efi-measured-boot
 . /etc/efi-measured-boot/config
-. "$APPDIR/bash_functions"
+. "$EMBOOT_SHARE/bash_functions"
 
 read_efi_vars
 

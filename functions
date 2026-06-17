@@ -411,7 +411,7 @@ predict_future_pcrs() {
     local outf=$1
     [ -n "$outf" ] || return 1
     shift
-    lc_tpm "$APPDIR/pcr-oracle" --from eventlog "$SEAL_PCRS" --format binary "$@" >"$outf"
+    lc_tpm "$EMBOOT_SHARE/pcr-oracle" --from eventlog "$SEAL_PCRS" --format binary "$@" >"$outf"
 }
 
 # Splits a string into multiple newline-separated strings of at most the given

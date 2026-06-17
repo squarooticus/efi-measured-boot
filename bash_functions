@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Kyle R. Rose
 
-. "${APPDIR:-/APPDIR-not-set}"/functions
+. "$EMBOOT_SHARE/functions"
 
 # Shell quotes with an attempt to make the result human-readable.
 quote_args() {

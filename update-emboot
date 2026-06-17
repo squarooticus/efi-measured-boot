@@ -57,9 +57,9 @@ shift $((OPTIND-1))
 
 set -e
 
+EMBOOT_SHARE=/usr/share/efi-measured-boot
 . /etc/efi-measured-boot/config
-[[ $cmd != ./* ]] || APPDIR=.
-. "${APPDIR:-APPDIR-not-set}"/bash_functions
+. "$EMBOOT_SHARE/bash_functions"
 
 EMBOOT_VERBOSE=$((EMBOOT_VERBOSE + verbose_add))
 EMBOOT_ADD_TO_COUNTER=$((EMBOOT_ADD_TO_COUNTER + add_to_counter))
