@@ -33,9 +33,9 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
         log -t boot -l $log_prio 'kernel release: %s' "$krel"
     }
 
+    EMBOOT_SHARE=/usr/share/efi-measured-boot
     . /etc/efi-measured-boot/config
-    [ -n "${cmd##./*}" ] || APPDIR=.
-    . "${APPDIR:-/APPDIR-not-set}"/functions
+    . "$EMBOOT_SHARE/functions"
 
     if would_log -t tpm,boot -l $LL_DEBUG_DETAIL; then set -x; fi
 
