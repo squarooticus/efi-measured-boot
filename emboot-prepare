@@ -320,7 +320,7 @@ echo "" >&2
 echo "=== efi-measured-boot system readiness check ===" >&2
 echo "" >&2
 
-check_root || true
+check_root
 check_arch || true
 check_uefi_mode || true
 check_grub || true
