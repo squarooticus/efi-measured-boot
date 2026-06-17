@@ -9,4 +9,4 @@ initramfs-tools-hooks/zz-efi-measured-boot                   usr/share/initramfs
 kernel-hooks/zz-efi-measured-boot                            usr/share/kernel/postinst.d/
 kernel-hooks/zz-efi-measured-boot                            usr/share/kernel/postrm.d/
 initramfs-hooks/efi-measured-boot                            usr/share/efi-measured-boot/initramfs-hooks/
-debian/emboot-firstboot.service                              lib/systemd/system/
+debian/emboot-firstboot.service                              usr/lib/systemd/system/
