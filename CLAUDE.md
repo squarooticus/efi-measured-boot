@@ -58,9 +58,10 @@ debian/
   control                      # package metadata + Depends
   rules                        # builds pcr-oracle submodule, installs binary
   changelog / copyright
-  postinst                     # generates /etc/efi-measured-boot/config template
+  postinst                     # generates /etc/efi-measured-boot/config template on first install
   postrm                       # removes /etc/efi-measured-boot on purge
   efi-measured-boot.install    # file install manifest
+  efi-measured-boot.links      # symlinks: hooks in /usr/share/ → /etc/ hook directories
   emboot-firstboot.service     # systemd one-shot unit for initial sealing
 ```
 
@@ -89,12 +90,13 @@ Each loader is a PE binary (`objcopy` embedding `.osrel`, `.krel`, `.cmdline`, `
 
 ## Kernel/initrd hooks
 
-`kernel-hooks/zz-efi-measured-boot` is installed as:
-- `/etc/kernel/postinst.d/zz-efi-measured-boot` — runs `update-emboot` on kernel install
-- `/etc/kernel/postrm.d/zz-efi-measured-boot` — runs `update-emboot -r -k <krel>` + increments counter on kernel removal
-- `/etc/initramfs/post-update.d/zz-efi-measured-boot` — runs `update-emboot` when initrd changes
+`kernel-hooks/zz-efi-measured-boot` is installed directly to `usr/share/kernel/postinst.d/` and `usr/share/kernel/postrm.d/` (`linux-run-hooks` scans both `/usr/share/kernel/` and `/etc/kernel/`). Handles kernel install/remove events only.
 
-`initramfs-hooks/efi-measured-boot` is installed as `/etc/initramfs-tools/hooks/efi-measured-boot` and copies required binaries (`tpm2_*`, `jq`, `libtss2-tcti-device.so.0`) and config into the initramfs.
+`initramfs-hooks/efi-measured-boot` is installed to `usr/share/efi-measured-boot/initramfs-hooks/` and symlinked to `/etc/initramfs/post-update.d/zz-efi-measured-boot`. Handles initrd rebuild events by calling `update-emboot`. (`update-initramfs` only scans `/etc/initramfs/post-update.d/`; no `/usr/share/` equivalent exists.)
+
+`initramfs-tools-hooks/zz-efi-measured-boot` is installed directly to `usr/share/initramfs-tools/hooks/`. The `mkinitramfs` hook: copies `tpm2_*`, `jq`, `libtss2-tcti-device.so.0`, config, and `functions` into the initramfs. (`mkinitramfs` scans both `/usr/share/initramfs-tools/hooks/` and `/etc/initramfs-tools/hooks/`.)
+
+Both hooks exit 0 immediately if `/etc/efi-measured-boot/configured` does not exist (created by `emboot-setup` when it first commits system changes).
 
 ## Logging system
 

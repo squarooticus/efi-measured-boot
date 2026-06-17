@@ -3,42 +3,33 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Kyle R. Rose
 
-PREREQ=""
-prereqs()
-{
-	echo "$PREREQ"
-}
+set -e
 
-case $1 in
-	prereqs)
-		prereqs
-		exit 0
-		;;
-esac
+cmd=$0
+arg1=$1
 
+which update-emboot >/dev/null 2>&1 || exit 0
 [ -e /etc/efi-measured-boot/configured ] || exit 0
 
-. /usr/share/initramfs-tools/hook-functions
+if type systemd-detect-virt >/dev/null 2>&1 &&
+   systemd-detect-virt --quiet --container; then
+	exit 0
+fi
 
-for i in createprimary flushcontext load nvread pcrread policynv policypcr startauthsession unseal; do
-    copy_exec /usr/bin/tpm2_$i /usr/bin
-done
-tcti=$(find /usr/lib -name 'libtss2-tcti-device.so.0' 2>/dev/null | head -1)
-[ -n "$tcti" ] || { echo "efi-measured-boot initramfs hook: libtss2-tcti-device.so.0 not found" >&2; exit 1; }
-copy_exec "$tcti" "${tcti#/}"
-copy_exec /usr/bin/jq /usr/bin
+eval set -- $DEB_MAINT_PARAMS
+mode="${1#\'}"
+mode="${mode%\'}"
+case $cmd:$mode:$DPKG_MAINTSCRIPT_PACKAGE in
+    */post-update.d/*:*:|*/post-update.d/*:*:*)
+        krel=$arg1
+        set +e
+        update-emboot ${krel:+-k "$krel"} ${EMBOOT_KERNEL_HOOK_NO_SEAL:+-S}
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            echo "update-emboot failed with exit code $rc" >&2
+            echo "WARNING: emboot EFI entries may be unbootable!" >&2
+        fi
+        ;;
+esac
 
-mkdir -p "$DESTDIR"/etc/efi-measured-boot
-cp /etc/efi-measured-boot/config "$DESTDIR"/etc/efi-measured-boot/
-
-EMBOOT_SHARE=/usr/share/efi-measured-boot
-mkdir -p "$DESTDIR/$EMBOOT_SHARE"
-cp "$EMBOOT_SHARE/functions" "$DESTDIR/$EMBOOT_SHARE/"
-
-force_load tpm_tis
-force_load tpm_crb
-
-# Hopefully this codepage/charset combination is universal
-force_load vfat
-force_load nls_cp437
-force_load nls_ascii
+exit 0

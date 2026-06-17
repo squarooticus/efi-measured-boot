@@ -43,16 +43,6 @@ case $cmd:$mode:$DPKG_MAINTSCRIPT_PACKAGE in
             echo "WARNING: kernel release not specified for removal operation" >&2
         fi
 	;;
-    */post-update.d/*:*:|*/post-update.d/*:*:*)
-        krel=$arg1
-        set +e
-        update-emboot ${krel:+-k "$krel"} ${EMBOOT_KERNEL_HOOK_NO_SEAL:+-S}
-        rc=$?
-        if [ "$rc" -ne 0 ]; then
-            echo "update-emboot failed with exit code $rc" >&2
-            echo "WARNING: emboot EFI entries may be unbootable!" >&2
-        fi
-        ;;
 esac
 
 exit 0
