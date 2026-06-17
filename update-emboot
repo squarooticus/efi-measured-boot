@@ -33,8 +33,8 @@ syntax: $(basename $0) <options>
 
 operations: (default is to update loaders and seal)
   -r                   Remove token for given kernel release (requires -k)
-  -s                   Do not update loaders: (re)seal/create tokens only
-  -S                   Do not seal/create tokens: update loaders only
+  -s                   (Re)create tokens for loaders, but do not update loaders
+  -S                   Update loaders, but do not (re)create tokens
   -h                   Help
 
 modifiers:

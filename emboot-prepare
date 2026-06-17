@@ -100,12 +100,7 @@ check_gpt() {
         status "$FAIL" "Boot disk $bootdisk uses ${pttype:-unknown} partition table (GPT required)"
         blocking_issues+=( "Boot disk $bootdisk must use GPT (found: ${pttype:-unknown})" )
         cat <<'EOF' | indent
-To fix (requires a live USB — back up data first):
-  1. Convert MBR to GPT with sgdisk (gdisk package):
-       sgdisk -g /dev/sda          # non-destructive MBR→GPT conversion
-  2. Create an EFI System Partition if one does not exist (type EF00, ≥500MiB)
-  3. Reinstall grub-efi: grub-install /dev/sda && update-grub
-  4. Reboot and verify UEFI boot before continuing
+To fix, see README.md for details and pointers.
 EOF
         return 1
     fi
@@ -196,14 +191,7 @@ check_boot_on_root() {
         status "$FAIL" "/boot is on a separate partition (must be on root device)"
         blocking_issues+=( "/boot must be on the root device (not a separate partition)" )
         cat <<'EOF' | indent
-To fix (do from a live USB to avoid moving a mounted partition):
-  1. Unmount /boot/efi
-  2. Remount /boot somewhere else (e.g., /mnt):
-       mount --bind /boot /mnt
-  3. Copy its contents to the root /boot:
-       tar -C /mnt -c . | tar -C /boot -xvp  # after unmounting /boot
-  4. Remove or comment the /boot line from /etc/fstab
-  5. Reinstall grub-efi: grub-install /dev/sda && update-grub
+To fix, see README.md for details and pointers.
 EOF
         return 1
     fi
@@ -225,10 +213,7 @@ check_luks() {
         status "$FAIL" "Root device has no crypttab entry — root is not LUKS-encrypted"
         blocking_issues+=( "Root must be on a LUKS2 dm-crypt device" )
         cat <<'EOF' | indent
-To encrypt an unencrypted root (WARNING: back up first; do from a live USB):
-  cryptsetup reencrypt --encrypt --reduce-device-size 32M \
-      --pbkdf pbkdf2 /dev/<root-partition>
-Then update /etc/crypttab and rebuild the initramfs.
+To fix, see README.md for details and pointers.
 EOF
         return 1
     }
@@ -248,9 +233,7 @@ EOF
         status "$FAIL" "Root is LUKS${luks_version:-?} (LUKS2 required)"
         blocking_issues+=( "Root LUKS device must use LUKS2 metadata (currently LUKS${luks_version})" )
         cat <<'EOF' | indent
-To convert LUKS1 to LUKS2 (can be done from initramfs shell):
-  cryptsetup convert --type luks2 /dev/<crypto-partition>
-Then reinstall grub-efi and reboot.
+To fix, see README.md for details and pointers.
 EOF
         return 1
     fi
