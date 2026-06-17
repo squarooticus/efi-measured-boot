@@ -5,7 +5,7 @@ ConditionPathExists=/etc/efi-measured-boot/pending-seal
 
 [Service]
 Type=oneshot
-ExecStart=/usr/sbin/emboot-firstboot
+ExecStart=/usr/share/efi-measured-boot/emboot-firstboot
 RemainAfterExit=no
 
 [Install]

@@ -1,9 +1,9 @@
 bash_functions                                               usr/share/efi-measured-boot/
 functions                                                    usr/share/efi-measured-boot/
 emboot_unseal.sh                                             usr/share/efi-measured-boot/
+emboot-firstboot                                             usr/share/efi-measured-boot/
 update-emboot                                                usr/sbin/
 emboot-setup                                                 usr/sbin/
-emboot-firstboot                                             usr/sbin/
 emboot-prepare                                               usr/sbin/
 initramfs-tools-hooks/zz-efi-measured-boot                   usr/share/initramfs-tools/hooks/
 kernel-hooks/zz-efi-measured-boot                            usr/share/kernel/postinst.d/
