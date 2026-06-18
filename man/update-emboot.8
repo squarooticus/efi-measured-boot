@@ -1,0 +1,123 @@
+.\" SPDX-License-Identifier: MIT
+.\" Copyright (c) 2026 Kyle R. Rose
+.TH UPDATE\-EMBOOT 8 "2026-06-18" "efi-measured-boot" "System Administration"
+.SH NAME
+update\-emboot \- rebuild EFI loaders and reseal TPM tokens for efi-measured-boot
+.SH SYNOPSIS
+.B update\-emboot
+[\fB\-r\fR | \fB\-s\fR | \fB\-S\fR]
+[\fB\-i\fR]
+[\fB\-k\fR \fIkernel\-release\fR]
+[\fB\-v\fR [\fB\-v\fR ...]]
+[\fB\-n\fR]
+[\fB\-h\fR]
+.SH DESCRIPTION
+.B update\-emboot
+is the main maintenance command for
+.BR efi-measured-boot .
+By default it rebuilds the EFI kernel blobs stored on the ESP, updates EFI
+boot entries, and reseals the LUKS2 passphrase to the new PCR values predicted
+by
+.BR pcr-oracle .
+.PP
+The system maintains two EFI loader files on the ESP:
+.TP
+.I $EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot.efi
+The newest installed kernel.
+.TP
+.I $EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot_old.efi
+The second-newest installed kernel (kept for rollback).
+.PP
+Each loader is a PE binary built by embedding the kernel, initrd, and command
+line into the systemd EFI stub via
+.BR objcopy (1).
+A corresponding sealed LUKS2 token is stored in the LUKS header; it holds the
+LUKS passphrase sealed to a TPM policy (PCRs + a monotonic NV counter) that
+will only unseal if the boot environment has not changed.
+.PP
+.B update\-emboot
+is called automatically by the kernel hook in
+.I /usr/share/kernel/postinst.d/
+and
+.IR /usr/share/kernel/postrm.d/ ,
+and by the initramfs post-update hook in
+.IR /etc/initramfs/post-update.d/ .
+.SH OPTIONS
+.SS Operations
+Exactly one of the following may be specified; the default (no flag) updates
+loaders and reseals.
+.TP
+.B \-r
+Remove the LUKS token for the kernel release given by
+.B \-k
+(required).  Does not modify EFI loader files.  Used by the kernel postrm hook
+after a kernel is removed.
+.TP
+.B \-s
+Reseal tokens only: predict new PCR values and update sealed LUKS tokens for
+all loaders, but do not rebuild or replace the EFI loader files.
+.TP
+.B \-S
+Update loaders only: rebuild EFI blobs and update boot entries, but do not
+create or update any sealed LUKS tokens.
+.SS Modifiers
+.TP
+.BI \-k " kernel\-release"
+Restrict the operation to the specified kernel release (e.g.\&
+.IR 6.1.0\-26\-amd64 ).
+Without this flag, all installed kernels are considered.
+.TP
+.B \-i
+Increment the monotonic TPM NV counter before sealing.  This invalidates all
+previously sealed tokens.  Typically used after removing a kernel (the kernel
+postrm hook calls this automatically).  Incompatible with
+.BR \-k .
+.SS Verbosity
+.TP
+.B \-v
+Increase verbosity.  May be repeated: one
+.B \-v
+enables informational messages; two enable debug output; three enable
+detailed debug output.  The environment variable
+.B EMBOOT_VERBOSE
+also controls this (0=normal, 3=info, 4=debug, 5=detail).
+.SS Other
+.TP
+.B \-n
+Dry run.  Print the commands that would be executed without running them.
+.TP
+.B \-h
+Print a short usage summary and exit.
+.SH FILES
+.TP
+.I /etc/efi-measured-boot/config
+Runtime configuration file.  Read on every invocation.  See
+.BR efi\-measured\-boot (7)
+for a description of each variable.
+.TP
+.I /etc/efi-measured-boot/configured
+Sentinel file created by
+.BR emboot\-setup (8)
+when the system is first committed to the emboot boot chain.  Kernel and
+initramfs hooks exit immediately if this file is absent.
+.TP
+.I $EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot.efi
+Current-kernel EFI loader blob.
+.TP
+.I $EFI_MOUNT/EFI/$OS_SHORT_NAME/emboot_old.efi
+Previous-kernel EFI loader blob.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+An error occurred.  Diagnostic messages are printed to standard error.
+.SH SEE ALSO
+.BR emboot\-setup (8),
+.BR emboot\-prepare (8),
+.BR cryptsetup (8),
+.BR tpm2_tools (1),
+.BR efibootmgr (8)
+.SH AUTHORS
+Kyle R. Rose

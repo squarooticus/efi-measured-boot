@@ -1,0 +1,153 @@
+.\" SPDX-License-Identifier: MIT
+.\" Copyright (c) 2026 Kyle R. Rose
+.TH EMBOOT\-PREPARE 8 "2026-06-18" "efi-measured-boot" "System Administration"
+.SH NAME
+emboot\-prepare \- check system readiness for efi-measured-boot and automate safe preparation steps
+.SH SYNOPSIS
+.B emboot\-prepare
+.SH DESCRIPTION
+.B emboot\-prepare
+is an interactive readiness wizard that should be run before
+.BR emboot\-setup (8).
+It checks the prerequisites for
+.B efi-measured-boot
+and, where safe to do so, offers to perform automated fixups.  Risky
+steps (partition layout changes, encryption setup) are explained with
+instructions but not performed automatically.
+.PP
+All output goes to standard error.  The program exits with status 0 if there
+are no blocking issues, or 1 if one or more blocking issues remain unresolved.
+.PP
+Must be run as root (e.g. via
+.BR sudo ).
+.SH CHECKS
+The following checks are performed in order.  Each is reported as
+.BR [PASS] ,
+.BR [FAIL] ,
+.BR [WARN] ,
+or
+.BR [SKIP] .
+Failures marked
+.B [FAIL]
+are blocking; the system cannot be set up until they are resolved.
+Warnings are non-blocking but recommended to address.
+.TP
+.B root
+The process must run as the root user.
+.TP
+.B arch
+The host architecture must be
+.BR x86_64 .
+.TP
+.B UEFI mode
+The system must be booted in UEFI mode (not CSM/legacy BIOS).
+Detected via the presence of
+.IR /sys/firmware/efi .
+.TP
+.B GPT partition table
+The boot disk's partition table must be GPT.  MBR partition tables do not
+support the EFI System Partition type required by UEFI firmware.
+.TP
+.B GRUB
+.B grub\-efi\-amd64
+must be installed.  If
+.B grub\-pc
+(legacy BIOS GRUB) is found instead, an automated fixup is offered (see
+.B AUTOMATED FIXUPS
+below).
+.TP
+.B GRUB_ENABLE_CRYPTODISK
+If
+.B grub\-efi\-amd64
+is installed,
+.B /etc/default/grub
+is checked for
+.B GRUB_ENABLE_CRYPTODISK=y
+(needed for GRUB to unlock the LUKS root during a recovery boot).  An
+automated fixup is offered if it is missing.
+.TP
+.B ESP
+The EFI System Partition must be mounted at
+.IR /boot/efi .
+The partition must be at least 500\ MiB (required to store two kernel
+blobs); a warning is issued if it is under 1\ GiB.
+.TP
+.B /boot on root
+.I /boot
+must reside on the root filesystem, not on a separate partition.  The
+initramfs is built into the EFI blob; a separate
+.I /boot
+partition is unnecessary and unsupported.
+.TP
+.B LUKS2
+The root device must be backed by a dm-crypt device with a LUKS2 header,
+reachable via
+.IR /etc/crypttab .
+Only a single LUKS layer in the device ancestry is supported.  At least one
+keyslot must use the PBKDF2 key derivation function (required for GRUB
+recovery boot, since GRUB 2.12 does not support Argon2).
+.TP
+.B TPM 2.0
+A TPM 2.0 chip must be present and accessible.  Detected by running
+.BR tpm2_pcrread (1).
+.SH AUTOMATED FIXUPS
+After all checks have run,
+.B emboot\-prepare
+offers to perform the following fixups (each requires interactive confirmation):
+.TP
+.B Install grub\-efi\-amd64
+If
+.B grub\-pc
+is installed and
+.B grub\-efi\-amd64
+is not, offers to install
+.B grub\-efi\-amd64
+(which will remove
+.BR grub\-pc ),
+run
+.BR grub\-install (8)
+on the boot disk, and run
+.BR update\-grub (8).
+.TP
+.B Set GRUB_ENABLE_CRYPTODISK
+If
+.B grub\-efi\-amd64
+is installed but
+.B GRUB_ENABLE_CRYPTODISK
+is not set, offers to add or uncomment the line in
+.I /etc/default/grub
+and run
+.BR update\-grub (8).
+.SH FILES
+.TP
+.I /etc/efi-measured-boot/config
+Runtime configuration (read if present).
+.TP
+.I /etc/default/grub
+Checked and optionally modified for
+.BR GRUB_ENABLE_CRYPTODISK .
+.TP
+.I /sys/firmware/efi
+Checked for UEFI mode detection.
+.TP
+.I /boot/efi
+Expected ESP mount point.
+.SH EXIT STATUS
+.TP
+.B 0
+No blocking issues found.  The system is ready for
+.BR emboot\-setup (8).
+.TP
+.B 1
+One or more blocking issues were found.  The summary printed to standard
+error lists each issue.
+.SH SEE ALSO
+.BR emboot\-setup (8),
+.BR update\-emboot (8),
+.BR cryptsetup (8),
+.BR grub\-install (8),
+.BR update\-grub (8),
+.BR tpm2_pcrread (1),
+.BR efibootmgr (8)
+.SH AUTHORS
+Kyle R. Rose
