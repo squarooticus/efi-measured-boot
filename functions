@@ -494,10 +494,18 @@ seal_data() {(
 
 # Attempts to unseal the sealed data (sealed.{priv,pub}) from the given working
 # directory using the expected platform state (also from that working
-# directory) and output the plaintext to stdout. Will use current PCR values
-# and/or monotonic counter value in creating the policy session if the expected
-# values are not available: on failure, this mainly impacts the error reported
-# by the TPM.
+# directory) and output the plaintext to stdout.
+#
+# This will use current PCR values and/or monotonic counter value in creating
+# the policy session if the expected values are not available: on failure, this
+# mainly impacts the error reported by the TPM, because any increment to the
+# monotonic counter or change in PCR values from those used to create the
+# policy at seal time would have resulted in a policy verification failure
+# anyway. (Note well that this property is an artifact of how our policy is
+# constructed, and is not in general a safe assumption about TPM policies: you
+# can craft policies that would verify when reconstructed with the original
+# values, but would obviously fail the policy hash check when constructed with
+# the current (different) values. TPM policy validation is subtle.)
 unseal_data() {(
     local workdir=${1:-.}
     # Make sure we don't unintentionally send anything but the output of

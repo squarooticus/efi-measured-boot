@@ -21,9 +21,7 @@ The installation procedure requires that your system be prepared in a few specif
 * `/boot` must not be a separate partition, but instead must be hosted on the encrypted root device. (This is mainly a safety measure to prevent any unintended future use of unprotected boot chains.)
 * You must have a compliant EFI System Partition mounted under `/boot/efi` with sufficient space to allow the installation of two kernel blobs (each roughly the size of the kernel and initrd combined: for future growth in kernel sizes, target 1GiB or more; 500MiB is the hard minimum).
 
-The easiest way to meet most of these requirements is to get grub-efi working with GRUB encrypted boot (`GRUB_ENABLE_CRYPTODISK=y` in `/etc/defaults/grub`) and verify that you can boot using the GRUB UEFI entry by entering the root passphrase when GRUB first starts up. While this measured boot solution by design bypasses GRUB and boots directly from EFI, I recommend retaining a working grub-efi install for recovery and for debugging when the ability to change the kernel command line is required.
-
-**Note for Debian <=12 users:** Debian's build of GRUB 2.06 does not have LUKS2 support built in, which means that if you're on Debian versions through bullseye **you'll need to build your own with that support**; and [it appears to break `GRUB_ENABLE_CRYPTODISK=y`](https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=926689), for which the easiest resolution is to **create a boot entry pointing at the monolithic EFI image copied manually to the EFI system partition**. For the latter, I recommend copying it to a different location (e.g., `/boot/efi/EFI/debian/grubx64ml.efi`) and creating an EFI entry pointing at it (e.g., `efibootmgr -c -L 'GRUB (monolithic)' -l '\EFI\debian\grubx64ml.efi'`), so subsequent runs of `grub-install` do not override your changes. Trixie's GRUB 2.12 on the other hand *does* appear to have LUKS2 support out-of-the-box, so the only gotcha is making sure your passphrase is encoded with PBKDF2 instead of Argon2, which as far as I can tell is not supported by any Debian-packaged version of GRUB 2.
+The easiest way to meet most of these requirements is to get grub-efi working with GRUB encrypted boot (`GRUB_ENABLE_CRYPTODISK=y` in `/etc/defaults/grub`) and verify that you can boot using the GRUB UEFI entry by entering the root passphrase when GRUB first starts up. While this measured boot solution by design bypasses GRUB and boots directly from EFI, I recommend retaining a working grub-efi install for recovery and for debugging when the ability to change the kernel command line is required. (Note: you will need at least one passphrase to be encoded with PBKDF2, not Argon2, as the latter is not supported by any Debian-packaged version of GRUB 2 as far as I can tell.)
 
 Roughly speaking, the steps involved in preparation for install are:
 
@@ -52,7 +50,7 @@ Roughly speaking, the steps involved in preparation for install are:
     * Modify system setup to disable CSM and disable Secure Boot.
     * Reboot using the newly-installed grub-efi EFI loader.
 1. Optional: delete the GRUB "BIOS boot" partition, which is required only for grub-pc.
-1. Add `GRUB_ENABLE_CRYPTODISK=y` to `/etc/default/grub`. (**Note:** This is currently broken in Debian GRUB 2.06, as even with this option the monolithic grub-efi loader is not installed into the ESP.)
+1. Add `GRUB_ENABLE_CRYPTODISK=y` to `/etc/default/grub`.
 
 ### If you have separate boot and root partitions:
 
@@ -63,22 +61,22 @@ Roughly speaking, the steps involved in preparation for install are:
     1. Remount `/boot/efi`.
     1. Remove or comment-out the `/boot` entry in `/etc/fstab`.
 1. Re-reinstall grub-efi (e.g., `grub-install /dev/sda` for boot disk `/dev/sda`) with the updated partition scheme, and then reboot to make sure the system is bootable before continuing. If your root device is currently encrypted, you will be prompted for the LUKS passphrase when GRUB starts.
-1. Optional: use gdisk to delete the now-vestigial boot partition.
+1. Optional: use gdisk to delete the now-vestigial boot partition. Also optional: if the now-vestigial boot partition is contiguous with the ESP, you can combine them into one larger partition!
 
 ### If your root device is *already* encrypted:
 
-1. Make sure at least one passphrase is stored with PBKDF2, as the Debian version of GRUB 2 as of Trixie (2.12) still does not support the argon2 PBKDF! You'll appreciate having the ability to use GRUB to boot your machine in a pinch, rather than having to boot a live USB disk and manually decrypt and mount partitions. You can re-encode your passphrase with PBKDF2 using `cryptsetup luksConvertKey --pbkdf pbkdf2`.
+1. Make sure at least one passphrase is stored with PBKDF2, as the Debian version of GRUB 2 as of Trixie (2.12) still does not support the Argon2 PBKDF! You'll appreciate having the ability to use GRUB to boot your machine in a pinch, rather than having to boot a live USB disk and manually decrypt and mount partitions. You can re-encode your passphrase with PBKDF2 using `cryptsetup luksConvertKey --pbkdf pbkdf2`.
 
 ### If your root device is *not* currently encrypted:
 
-1. Use `cryptsetup reencrypt` to encrypt your disk. This only supports LUKS2 metadata, so you can skip the LUKS1-to-LUKS2 conversion. **Note:** The Debian version of GRUB 2 as of Trixie (2.12) does not support argon2 PBKDF, so make sure to specify `--pbkdf pbkdf2` when adding your initial passphrase.
-1. Reinstall grub-efi to make sure the config is updated to load the luks2 module and prompt you for your passphrase. (**Note:** This was broken in Debian GRUB 2.06, which did not have LUKS2 support built-in, but appears to be fixed in Trixie's GRUB 2.12.)
+1. Use `cryptsetup reencrypt` to encrypt your disk. This only supports LUKS2 metadata, so you can skip the LUKS1-to-LUKS2 conversion. **Note:** The Debian version of GRUB 2 as of Trixie (2.12) does not support Argon2 PBKDF, so make sure to specify `--pbkdf pbkdf2` when adding your initial passphrase.
+1. Reinstall grub-efi to make sure the config is updated to load the luks2 module and prompt you for your passphrase.
 1. Reboot to make sure the system is bootable before continuing.
 
 ### If your root device is currently encrypted with LUKS1 metadata:
 
 1. Use `cryptsetup convert --type luks2`. You can do this from the initrd if you use the GRUB shell to add the Linux command line parameter `break` to drop you into busybox during the boot process.
-1. Reinstall grub-efi to make sure the config is updated to load the luks2 module and prompt you for your passphrase. (**Note:** This was broken in Debian GRUB 2.06, which did not have LUKS2 support built-in, but appears to be fixed in Trixie's GRUB 2.12.)
+1. Reinstall grub-efi to make sure the config is updated to load the luks2 module and prompt you for your passphrase.
 1. Reboot to make sure the system is bootable before continuing.
 
 ### Enable the TPM
