@@ -1,0 +1,181 @@
+.\" SPDX-License-Identifier: MIT
+.\" Copyright (c) 2026 Kyle R. Rose
+.TH EMBOOT\-SETUP 8 "2026-06-18" "efi-measured-boot" "System Administration"
+.SH NAME
+emboot\-setup \- first-time setup for efi-measured-boot
+.SH SYNOPSIS
+.B emboot\-setup
+.SH DESCRIPTION
+.B emboot\-setup
+performs the one-time system changes required to activate the
+.B efi-measured-boot
+boot chain.  It is interactive: it prints progress to standard error and
+prompts before taking any breaking action.
+.PP
+Run
+.BR emboot\-prepare (8)
+first to verify that all prerequisites are met.  Edit
+.I /etc/efi-measured-boot/config
+before running
+.B emboot\-setup
+if the defaults need adjustment (ESP mount point, OS name, PCR selection, etc.).
+.PP
+Must be run as root (e.g. via
+.BR sudo ).
+.PP
+On successful completion,
+.B emboot\-setup
+instructs the system to boot the emboot EFI loader on the next boot.  The
+first boot triggers
+.BR emboot\-firstboot.service ,
+which seals the LUKS passphrase to the TPM.  Subsequent kernel installs and
+removals are handled automatically by the kernel and initramfs hooks.
+.SH STEPS
+.B emboot\-setup
+performs the following steps in order.
+.TP
+.B Pre-flight checks
+Verifies the requirements that
+.BR emboot\-setup
+is about to rely on:
+root privileges, x86_64 architecture, EFI mode, ESP mounted as vfat at
+.IR /boot/efi ,
+ESP at least 500\ MiB, root on LUKS2 with a PBKDF2 keyslot, and TPM 2.0
+accessible.  Aborts if any check fails.
+.TP
+.B Legacy removal (interactive)
+If a previous manual (non-packaged) installation is found under
+.I /usr/local
+.RB ( /usr/local/sbin/update\-emboot
+or
+.IR /usr/local/share/efi-measured-boot ),
+the user is offered the option to remove it.
+.TP
+.B Crypttab modification
+Reads
+.I /etc/crypttab
+and adds the
+.B keyscript=
+option pointing to
+.I /usr/share/efi-measured-boot/emboot_unseal.sh
+on the entry for the root LUKS device.  Any pre-existing
+.B keyscript=
+option is replaced.  The original
+.I /etc/crypttab
+is preserved as
+.I /etc/crypttab.pre_emboot
+and restored on failure.
+.TP
+.B Monotonic counter provisioning
+Creates a TPM2 NV monotonic counter at the NV index specified by
+.B COUNTER_HANDLE
+in the configuration (default
+.BR 0x1926001 ).
+The counter value is included in the TPM sealing policy; incrementing it
+invalidates all sealed tokens, preventing downgrade attacks.
+.TP
+.B LUKS key generation
+Generates a 128-byte random binary key and writes it to
+.B $LUKS_KEY
+(default
+.IR /etc/keys/root-emboot.key )
+with mode 0600, creating the parent directory if needed.  If the key file
+already exists, it is reused.  The key is added to the root LUKS header
+using
+.BR cryptsetup\-luksAddKey (8)
+with PBKDF2 KDF if it is not already present; the user is prompted for an
+existing LUKS passphrase.
+.TP
+.B Firstboot service activation
+Enables
+.B emboot\-firstboot.service
+and marks the system with a
+.I pending-seal
+sentinel so the service knows to perform sealing on the first emboot boot.
+.TP
+.B Initramfs rebuild
+Runs
+.B update\-initramfs\ \-u\ \-k\ all
+to rebuild the initramfs with the emboot hooks included.  Sealing is
+suppressed during this step (the
+.B EMBOOT_KERNEL_HOOK_NO_SEAL
+environment variable is set) because the EFI loaders are not yet in their
+final state.
+.TP
+.B Next-boot EFI entry
+Uses
+.BR efibootmgr (8)
+to set the emboot EFI entry as the one-time
+.RB ( BootNext )
+boot target.  The entry must already exist; if it does not,
+.B emboot\-setup
+exits with an error and instructs the user to create it first.
+.SH FAILURE HANDLING
+From the crypttab modification step onward,
+.B emboot\-setup
+registers an
+.BR EXIT
+trap.  If any step fails, the trap:
+.IP \(bu 4
+restores
+.I /etc/crypttab
+from
+.IR /etc/crypttab.pre_emboot ,
+.IP \(bu
+removes
+.IR /etc/efi-measured-boot/pending-seal ,
+.IP \(bu
+removes
+.IR /etc/efi-measured-boot/configured .
+.PP
+This leaves the system in a safe state where the emboot hooks will not activate
+(they check for
+.IR /etc/efi-measured-boot/configured )
+and the original crypttab is restored.
+.SH FILES
+.TP
+.I /etc/efi-measured-boot/config
+Runtime configuration.  Edit before running
+.B emboot\-setup
+to customise the ESP mount point, OS name, LUKS key path, sealed PCRs, and
+similar settings.
+.TP
+.I /etc/efi-measured-boot/configured
+Created early in the setup process to signal to the kernel and initramfs hooks
+that setup has been committed.  Removed on failure.
+.TP
+.I /etc/efi-measured-boot/pending-seal
+Sentinel consumed by
+.B emboot\-firstboot.service
+on the first emboot boot; triggers sealing.  Removed on failure.
+.TP
+.I /etc/crypttab
+Modified to add the emboot keyscript.
+.TP
+.I /etc/crypttab.pre_emboot
+Backup of
+.I /etc/crypttab
+taken before modification; restored on failure.
+.TP
+.I /etc/keys/root-emboot.key
+Default path for the LUKS key file (controlled by
+.B LUKS_KEY
+in the configuration).
+.SH EXIT STATUS
+.TP
+.B 0
+Setup completed successfully.  Reboot to activate the emboot boot chain.
+.TP
+.B 1
+A pre-flight check failed or a setup step encountered an error.
+The system is left in a safe, reverted state.
+.SH SEE ALSO
+.BR emboot\-prepare (8),
+.BR update\-emboot (8),
+.BR cryptsetup (8),
+.BR tpm2_tools (1),
+.BR efibootmgr (8),
+.BR update\-initramfs (8),
+.BR systemctl (1)
+.SH AUTHORS
+Kyle R. Rose
