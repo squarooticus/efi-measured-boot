@@ -18,8 +18,12 @@ The installation procedure requires that your system be prepared in a few specif
 * The TPM must be enabled in the firmware settings: this can either be discrete (if your motherboard has a separate TPM 2.0 chip) or PTT/fTPM (if you are using the firmware TPM provided by your CPU).
 * Secure boot must be disabled, as this software does not currently support signing the resulting EFI loaders.
 * The root device must be hosted on a dm-crypt device with LUKS2 metadata (version 2 required for token support).
-* `/boot` must not be a separate partition, but instead must be hosted on the encrypted root device. (This is mainly a safety measure to prevent any unintended future use of unprotected boot chains.)
-* You must have a compliant EFI System Partition mounted under `/boot/efi` with sufficient space to allow the installation of two kernel blobs (each roughly the size of the kernel and initrd combined: for future growth in kernel sizes, target 1GiB or more; 500MiB is the hard minimum).
+* `/boot` must not be a separate partition, but instead must be hosted on the encrypted root device.
+
+    This is somewhat of an artificial restriction; an ext2-formatted `/boot` is really irrelevant to this system, as UEFI can only boot UKIs from VFAT partitions. But freeing up the separate boot partition might enable the user to create a larger ESP if the two partitions are contiguous. And anyway removing the plaintext `/boot` reduces the risk of putting potentially sensitive data (such as keys) on an unencrypted partition. It's much easier to reason about the security of the system against offline attacks if all data partitions are encrypted-at-rest.
+* You must have a compliant EFI System Partition mounted under `/boot/efi` with sufficient space to allow the installation of two kernel blobs, each roughly the size of the kernel and initrd combined.
+
+    For future growth in kernel sizes, target 1GiB or more. 500MiB is the hard minimum required by this software stack.
 
 The easiest way to meet most of these requirements is to get grub-efi working with GRUB encrypted boot (`GRUB_ENABLE_CRYPTODISK=y` in `/etc/defaults/grub`) and verify that you can boot using the GRUB UEFI entry by entering the root passphrase when GRUB first starts up. While this measured boot solution by design bypasses GRUB and boots directly from EFI, I recommend retaining a working grub-efi install for recovery and for debugging when the ability to change the kernel command line is required. (Note: you will need at least one passphrase to be encoded with PBKDF2, not Argon2, as the latter is not supported by any Debian-packaged version of GRUB 2 as far as I can tell.)
 
@@ -87,13 +91,15 @@ Your system should now be ready to install the EFI measured boot software stack.
 
 ## Installation
 
-Build the package from source (requires `gcc`, `make`, `pkg-config`, `libtss2-dev`, `libjson-c-dev`, `libssl-dev`, and an initialized `pcr-oracle` submodule):
+Build and install the package from source:
 
 ```
 git submodule update --init
 dpkg-buildpackage -b -us -uc
 sudo apt install ../efi-measured-boot_*.deb
 ```
+
+Building from source requires `gcc`, `make`, `pkg-config`, `libtss2-dev`, `libjson-c-dev`, and `libssl-dev`.
 
 ## Activation
 
@@ -137,6 +143,22 @@ Once the package is installed:
    On the first boot via the emboot EFI chain, the system automatically seals the LUKS
    passphrase to the current TPM PCR values. Subsequent kernel installs and removals are
    handled automatically by the package's kernel hooks.
+
+## Booting insecurely in a safe manner to restore measured boot
+
+If for whatever reason (e.g., BIOS upgrade) you know in advance that you're going to need to enter the passphrase on startup, make sure to follow a procedure like the one below to minimize the risk of compromise:
+
+1. First, avoid making any such change when you do not have a secure location available to complete this procedure! Once you've made a change that breaks measured boot, you must wait until getting to a secure location to fix it, or even to boot.
+
+    Ideally, also physically disable networking from here until procedure completion.
+
+1. Second, confirm measured boot success before making the change: this means rebooting once as-normal to confirm machine integrity.
+
+1. Make the breaking change.
+
+1. Now, reboot into emboot. Measured boot will fail and you will be prompted for your passphrase. This is where being in a secure physical location really matters, because—absent a Yubikey or other device that enters your passphrase without someone being able to observe your typing—you may expose your passphrase to a passive adversary.
+
+1. `sudo update-emboot -s`, and confirm via another reboot that measured boot is back in business.
 
 ## Acknowledgements
 
