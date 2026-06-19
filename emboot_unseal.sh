@@ -18,7 +18,7 @@ fallback() {
     exec "$keyscript" "$keyscriptarg" >&3 3>&-
 }
 
-trap 'rc=$?; trap - EXIT; [ -z "$tmpdir" ] || rm -rf "$tmpdir"; [ -z "$UNSEAL_PAUSE" ] || sleep "$UNSEAL_PAUSE"; [ "$rc" -eq 0 ] && exit 0; fallback' EXIT
+trap 'rc=$?; trap - EXIT; [ -n "$EMBOOT_NOCLEAN" ] || [ -z "$tmpdir" ] || rm -rf "$tmpdir"; [ -z "$UNSEAL_PAUSE" ] || sleep "$UNSEAL_PAUSE"; [ "$rc" -eq 0 ] && exit 0; fallback' EXIT
 
 set -e
 
@@ -40,11 +40,8 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
     if would_log -t tpm,boot -l $LL_DEBUG_DETAIL; then set -x; fi
 
     tmpdir=$(setup_tmp_dir)
-
-    verbose_do -t tpm,boot -l $LL_INFO eval 'read_pcrs >$tmpdir/current_pcrs.txt'
-    verbose_do -t tpm,boot -l $LL_INFO eval 'read_counter "$tmpdir"/current_counter'
-
     krel=$(uname -r)
+
     for tid in $(list_luks_token_ids "$CRYPTTAB_SOURCE" "$krel"); do
         export_luks_token "$tmpdir" "$CRYPTTAB_SOURCE" "$tid"
 
@@ -54,11 +51,17 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
         fi
         outcome FAILED
 
-        log_info -t tpm,boot 'counter: current=%d expects<=%d' "0x$(xxd -p -c9999 <$tmpdir/current_counter)" "0x$(xxd -p -c9999 <$tmpdir/counter)"
-        verbose_do -t tpm,boot -l $LL_INFO eval 'diff_pcrs "$tmpdir"/pcrs "$tmpdir"/current_pcrs.txt | sed -e "s/^/  /"'
+        pcrlist=$(cat "$tmpdir"/pcrlist)
+        counterhandle=$(cat "$tmpdir"/counterhandle)
+
+        verbose_do -t tpm,boot -l $LL_INFO eval 'read_pcrs "$pcrlist" >"$tmpdir"/current_pcrvalues.txt'
+        verbose_do -t tpm,boot -l $LL_INFO eval 'read_counter "$counterhandle" "$tmpdir"/current_countervalue'
+
+        log_info -t tpm,boot 'counter %s: current=%d expects<=%d' "$counterhandle" "0x$(xxd -p -c9999 <"$tmpdir"/current_countervalue)" "0x$(xxd -p -c9999 <"$tmpdir"/countervalue)"
+        verbose_do -t tpm,boot -l $LL_INFO eval 'diff_pcrs "$pcrlist" "$tmpdir"/pcrvalues "$tmpdir"/current_pcrvalues.txt | sed -e "s/^/  /"'
     done
 
-    rm -rf "$tmpdir"
+    [ -n "$EMBOOT_NOCLEAN" ] || rm -rf "$tmpdir"
     log 'Falling back to passphrase entry'
 fi
 

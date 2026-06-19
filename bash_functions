@@ -7,17 +7,17 @@
 
 # Shell quotes with an attempt to make the result human-readable.
 quote_args() {
-    local sq="'"
-    local dq='"'
+    local sq=\'
+    local dq=\"
     local fs=/
-    local space=""
+    local space=''
     local qw
     local w
     for w; do
         if [ -n "$w" -a -z "${w//[0-9a-zA-Z_,.:=$fs-]}" ]; then
             printf %s "$space$w"
         else
-            qw="$sq${w//$sq/$sq$dq$sq$dq$sq}$sq"
+            qw=$sq${w//$sq/$sq$dq$sq$dq$sq}$sq
             qw=${qw//$sq$sq}
             printf %s "$space${qw:-$sq$sq}"
         fi
@@ -170,7 +170,7 @@ read_efi_vars() {
         local loader bootnum desc partuuid
         while read -r loader bootnum desc partuuid; do
             log_debug -t efi 'reading EFI entry %s: desc=%s partuuid=%s loader=%s' "$bootnum" "$desc" "$partuuid" "$loader"
-            efi_apps[$(printf %s "$loader" | tr a-z A-Z)]="$bootnum"$'\t'"$desc"$'\t'"$partuuid"$'\t'"$loader"
+            efi_apps[$(printf %s "$loader" | tr a-z A-Z)]=$bootnum$'\t'$desc$'\t'$partuuid$'\t'$loader
         done < <(efibootmgr -v 2>/dev/null | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-fA-F-]\+\),.*File(\([^)]\+\)).*/\4\t\1\t\2\t\3/')
 
         local IFS=','
@@ -203,7 +203,7 @@ create_emboot_efi_entry() {
     local efi_disk_and_part=( $(device_to_disk_and_partition "${efidevinfo[1]}") )
     local efidisk=${efi_disk_and_part[0]}
     local efipartition=${efi_disk_and_part[1]}
-    local loader="\\EFI\\$OS_SHORT_NAME\\$loader_basename"
+    local loader=\\EFI\\$OS_SHORT_NAME\\$loader_basename
     lc_efi efibootmgr -C -d "$efidisk" -p "$efipartition" -l "$loader" -L "$OS_SHORT_NAME emboot${tag:+ ($tag)}" 2>/dev/null
 }
 
@@ -280,7 +280,11 @@ import_luks_token() {
     declare -a args
     local json=
     local k
-    for k in counter pcrs sealed.priv sealed.pub; do
+    for k in counterhandle pcrlist; do
+        args+=( --rawfile "${k//./_}" "$workdir/$k" )
+        json+=", \"$k\": \$${k//./_}"
+    done
+    for k in countervalue pcrvalues sealed.priv sealed.pub; do
         base64 -w 0 <$workdir/$k >$workdir/$k.b64
         args+=( --rawfile "${k//./_}" "$workdir/$k.b64" )
         json+=", \"$k\": \$${k//./_}"
@@ -342,11 +346,12 @@ stub_does_extra_pcr_4_measurement() {
 }
 
 # Given a working directory (or $PWD if empty) containing a monotonic counter
-# value `counter`; a path to a loader; and a kernel release string (of the form
-# returned by uname -r), seals the LUKS passphrase to the loader by predicting
-# future PCR values based on the UEFI boot log for the current boot. Will bomb
-# out if the system has not been booted from either the primary or old emboot
-# boot entry.
+# handle `counterhandle` with value `countervalue` and a comma-separated list
+# of PCRs `pcrlist`; a path to a loader; and a kernel release string (of the
+# form returned by uname -r), seals the LUKS passphrase to the loader by
+# predicting future PCR values based on the UEFI boot log for the current boot.
+# Will bomb out if the system has not been booted from either the primary or
+# old emboot boot entry.
 seal_and_create_token() {
     local workdir=${1:-.}
     local cryptdev=$2
@@ -380,7 +385,8 @@ seal_and_create_token() {
     pcr_oracle_debug=
     if (( EMBOOT_VERBOSE >= $LL_DEBUG )); then pcr_oracle_debug=-ddd; fi
 
-    predict_future_pcrs "$workdir"/pcrs $pcr_oracle_debug --stop-event bsa-path="${current_loader//\\//}" "${measurements[@]}"
+    predict_future_pcrs "$(cat "$workdir"/pcrlist)" "$workdir"/pcrvalues $pcr_oracle_debug --stop-event bsa-path="${current_loader//\\//}" "${measurements[@]}"
+
     seal_data "$workdir" <$LUKS_KEY
     import_luks_token "$workdir" "$cryptdev" "$krel"
 
@@ -468,7 +474,7 @@ install_loaders() {(
 
     cleanup() {
         rc=$?
-        [ -n "$tmpdir" ] && rm -rf "$tmpdir"
+        [ -n "$EMBOOT_NOCLEAN" ] || [ -z "$tmpdir" ] || rm -rf "$tmpdir"
         exit $rc
     }
 
@@ -556,13 +562,26 @@ update_tokens() {(
 
     cleanup() {
         rc=$?
-        [ -n "$tmpdir" ] && rm -rf "$tmpdir"
+        [ -n "$EMBOOT_NOCLEAN" ] || [ -z "$tmpdir" ] || rm -rf "$tmpdir"
         exit $rc
     }
 
     trap cleanup EXIT
 
     tmpdir=$(setup_tmp_dir)
+
+    # Setup that doesn't change with multiple tokens
+    printf %s "$COUNTER_HANDLE" >$tmpdir/counterhandle
+    printf %s "$SEAL_PCRS" >$tmpdir/pcrlist
+    read_counter "$COUNTER_HANDLE" "$tmpdir"/countervalue
+
+    # Debug code for manipulating counter
+    if ((EMBOOT_ADD_TO_COUNTER != 0)); then
+        ((curctr=0x$(xxd -p -c9999 <$tmpdir/countervalue) ))
+        ((sealctr=curctr+$EMBOOT_ADD_TO_COUNTER))
+        printf %016x $((sealctr)) | xxd -r -p -c9999 >$tmpdir/countervalue
+        printf 'Using monotonic counter value %d (=%d+%d)\n' "$((sealctr))" "$((curctr))" "$EMBOOT_ADD_TO_COUNTER"
+    fi
 
     read_efi_vars
 
@@ -577,18 +596,6 @@ update_tokens() {(
                 token_ids=( $(list_luks_token_ids "${cryptdev[1]}" "$loader_krel") )
                 if [ -n "$all_kernels" -o "$krel" = "$loader_krel" -o ${#token_ids} -eq 0 ]; then
                     log -t loader,luks 'Creating token for EFI loader %s for %s' "$loader" "$loader_krel"
-                    # Read the counter once for all subsequent seal operations
-                    [ -e "$tmpdir"/counter ] || {
-                        read_counter "$tmpdir"/counter;
-                        if ((EMBOOT_ADD_TO_COUNTER != 0)); then
-                            cat "$tmpdir"/counter | xxd -p -c9999;
-                            ((curctr=0x$(xxd -p -c9999 <$tmpdir/counter) ));
-                            ((sealctr=curctr+$EMBOOT_ADD_TO_COUNTER));
-                            printf %016x $((sealctr)) | xxd -r -p -c9999 >$tmpdir/counter;
-                            printf 'Using monotonic counter value %d (=%d+%d)\n' $((sealctr)) $((curctr)) "$EMBOOT_ADD_TO_COUNTER";
-                            cat "$tmpdir"/counter | xxd -p -c9999;
-                        fi;
-                    }
                     seal_and_create_token "$tmpdir" "${cryptdev[1]}" "$loader" "$loader_krel"
                 else
                     log_info -t loader,luks 'Preserving existing token for EFI loader %s for %s' "$loader" "$loader_krel"
