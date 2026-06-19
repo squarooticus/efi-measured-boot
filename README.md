@@ -144,21 +144,9 @@ Once the package is installed:
    passphrase to the current TPM PCR values. Subsequent kernel installs and removals are
    handled automatically by the package's kernel hooks.
 
-## Booting insecurely in a safe manner to restore measured boot
+## Frequently-asked Questions
 
-If for whatever reason (e.g., BIOS upgrade) you know in advance that you're going to need to enter the passphrase on startup, make sure to follow a procedure like the one below to minimize the risk of compromise:
-
-1. First, avoid making any such change when you do not have a secure location available to complete this procedure! Once you've made a change that breaks measured boot, you must wait until getting to a secure location to fix it, or even to boot.
-
-    Ideally, also physically disable networking from here until procedure completion.
-
-1. Second, confirm measured boot success before making the change: this means rebooting once as-normal to confirm machine integrity.
-
-1. Make the breaking change.
-
-1. Now, reboot into emboot. Measured boot will fail and you will be prompted for your passphrase. This is where being in a secure physical location really matters, because—absent a Yubikey or other device that enters your passphrase without someone being able to observe your typing—you may expose your passphrase to a passive adversary.
-
-1. `sudo update-emboot -s`, and confirm via another reboot that measured boot is back in business.
+There is now a [FAQ](FAQ.md)!
 
 ## Acknowledgements
 
