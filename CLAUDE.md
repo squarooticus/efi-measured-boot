@@ -96,7 +96,7 @@ Each loader is a PE binary (`objcopy` embedding `.osrel`, `.krel`, `.cmdline`, `
 
 `initramfs-tools-hooks/zz-efi-measured-boot` is installed directly to `usr/share/initramfs-tools/hooks/`. The `mkinitramfs` hook: copies `tpm2_*`, `jq`, `libtss2-tcti-device.so.0`, config, and `functions` into the initramfs. (`mkinitramfs` scans both `/usr/share/initramfs-tools/hooks/` and `/etc/initramfs-tools/hooks/`.)
 
-Both hooks exit 0 immediately if `/etc/efi-measured-boot/configured` does not exist (created by `emboot-setup` when it first commits system changes).
+All three hooks exit 0 immediately if `/etc/efi-measured-boot/configured` does not exist (created by `emboot-setup` when it first commits system changes).
 
 ## Logging system
 
@@ -134,7 +134,7 @@ sudo update-emboot -n
 
 ## pcr-oracle submodule
 
-`pcr-oracle/` is a git submodule (relative URL `../pcr-oracle.git`). It is a C binary that predicts future PCR values by replaying the TPM event log and extending with measurements for the new EFI loader. Built during `dpkg-buildpackage` via `debian/rules`. Installed to `/usr/bin/pcr-oracle`. Initialize with `git submodule update --init` before building.
+`pcr-oracle/` is a git submodule (relative URL `../pcr-oracle.git`). It is a C binary that predicts future PCR values by replaying the TPM event log and extending with measurements for the new EFI loader. Built during `dpkg-buildpackage` via `debian/rules`. Installed to `/usr/libexec/efi-measured-boot/pcr-oracle`. Initialize with `git submodule update --init` before building.
 
 ## System requirements
 

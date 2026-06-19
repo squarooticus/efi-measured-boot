@@ -389,29 +389,32 @@ extract_krel_from_loader() {
     [ -n "$krel" ] && printf %s "$krel"
 }
 
-# Increments the monotonic counter
+# Increments the given monotonic counter
 increment_counter() {
-    lc_tpm tpm2_nvincrement -C o "$COUNTER_HANDLE"
+    lc_tpm tpm2_nvincrement -C o "$1"
 }
 
-# Writes the current value of the monotonic counter to the argument filename
+# Writes the current value of the given monotonic counter to the second
+# argument filename
 read_counter() {
-    [ -n "$1" ] || return 1
-    lc_tpm tpm2_nvread -C o "$COUNTER_HANDLE" -s 8 -o "$1"
+    [ -n "$2" ] || return 1
+    lc_tpm tpm2_nvread -C o "$1" -s 8 -o "$2"
 }
 
-# Writes the configured PCRs to the argument filename
+# Writes the binary values of the given comma-separated list of PCRs to the
+# second argument filename, or as hex to stdout if not specified
 read_pcrs() {
-    lc_tpm tpm2_pcrread ${1:+-Q} sha256:"$SEAL_PCRS" ${1:+-o "$1"}
+    lc_tpm tpm2_pcrread ${2:+-Q} sha256:"$1" ${2:+-o "$2"}
 }
 
-# Writes future PCR predictions to the argument filename, passing the remaining
-# arguments to pcr-oracle
+# Writes future PCR predictions for the given comma-separated list of PCRs to
+# the second argument filename, passing the remaining arguments to pcr-oracle
 predict_future_pcrs() {
-    local outf=$1
+    local pcrlist=$1
+    local outf=$2
     [ -n "$outf" ] || return 1
-    shift
-    lc_tpm "/usr/libexec/efi-measured-boot/pcr-oracle" --from eventlog "$SEAL_PCRS" --format binary "$@" >"$outf"
+    shift 2
+    lc_tpm "/usr/libexec/efi-measured-boot/pcr-oracle" --from eventlog "$pcrlist" --format binary "$@" >$outf
 }
 
 # Splits a string into multiple newline-separated strings of at most the given
@@ -426,22 +429,61 @@ split_by_length() {
     done
 }
 
+# Runs jq with the given arguments, but returns 1 without any output if the
+# result is "null".
+jqnullerr() {
+    result=$(jq "$@")
+    if [ "$result" = null ]; then
+        return 1
+    fi
+    printf %s "$result"
+}
+
+# Like jqnullerr, but additionally asserts that the result is a JSON string.
+# The filter must be the first argument; remaining arguments are passed to jq.
+jqstring() {
+    local filter="$1"
+    shift
+    jq -er "$@" "${filter} | if . == null then error(\"null\") elif type != \"string\" then error(\"expected string, got \" + type) else . end"
+}
+
+# Validates that the file at the given path contains a plausible TPM NV handle
+# (0x followed by hex digits).
+validate_counterhandle() {
+    case "$(cat "$1")" in
+        0x[0-9a-fA-F]*) ;;
+        *) log_error -t luks 'invalid counterhandle in token'; return 1 ;;
+    esac
+}
+
+# Validates that the file at the given path contains a non-empty
+# comma-separated list of non-negative integers (e.g. "0,2,4").
+validate_pcrlist() {
+    case "$(cat "$1")" in
+        ''|*[!0-9,]*|,*|*,) log_error -t luks 'invalid pcrlist in token'; return 1 ;;
+        *) ;;
+    esac
+}
+
 # Complexity required only because tpm2-tools provides no way of formatting
 # binary PCR output as YAML
 diff_pcrs() {
-    local expected_fn=$1
-    local expected_txt_fn=$(dirname $1)/expected_pcrs.txt
-    local current_txt_fn=$2
+    local pcrlist=$1
+    local expected_fn=$2
+    local current_txt_fn=$3
+
     local expected_hex=$(xxd -p -c9999 <$expected_fn | tr a-f A-F)
     eval set -- $(split_by_length "$expected_hex" 64)
     local re=''
     {
         local IFS=,
-        for pcr in $SEAL_PCRS; do
-            re="$re"'s/^\(\s*'"$pcr"'\s*:\s*0x\).*/\1'"$(quote_bre "$1")"'/i; '
+        for pcr in $pcrlist; do
+            re=$re's/^\(\s*'$pcr'\s*:\s*0x\).*/\1'$(quote_bre "$1")'/i; '
             shift
         done
     }
+
+    local expected_txt_fn=$(dirname "$expected_fn")/expected_pcrs.txt
     sed -e "$re" <$current_txt_fn >$expected_txt_fn
     diff -i -u -U 9999 "$expected_txt_fn" "$current_txt_fn"
 }
@@ -454,26 +496,37 @@ list_luks_token_ids() {
     lc_luks cryptsetup luksDump "$cryptdev" --dump-json-metadata | lc_misc jq -j '."tokens" | to_entries | map(select(."value"."type" == "emboot"'"${krel:+ and .\"value\".\"krel\" == \"$krel\"}"')) | map(.key) | join(" ")'
 }
 
-# Outputs the expected platform state and sealed data from a given token ID
-# from the given LUKS device to the given working directory
+# Outputs the policy variables, expected platform state, and sealed data from a
+# given token ID from the given LUKS device to the given working directory
 export_luks_token() {
     local workdir=${1:-.}
     local cryptdev=$2
     local token_id=$3
+
     md=$(lc_luks cryptsetup token export "$cryptdev" --token-id "$token_id" 2>/dev/null)
     if [ -z "$md" ]; then
         return 1
     fi
-    for k in counter pcrs sealed.priv sealed.pub; do
+
+    for k in counterhandle pcrlist; do
         rm -f "$workdir/$k"
-        printf %s "$md" | lc_misc jq -j ".\"$k\"" | b64decode >$workdir/$k
+        printf %s "$md" | lc_misc jqstring ".\"$k\"" >$workdir/$k
+    done
+    validate_counterhandle "$workdir/counterhandle" || return 1
+    validate_pcrlist "$workdir/pcrlist" || return 1
+
+    for k in countervalue pcrvalues sealed.priv sealed.pub; do
+        rm -f "$workdir/$k"
+        printf %s "$md" | lc_misc jqnullerr -j ".\"$k\"" | b64decode >$workdir/$k
     done
     return 0
 }
 
-# Seals stdin to the (expected future) platform state (PCRs `pcrs` and
-# monotonic counter value `counter`) from the argument working directory.
-# Sealed data is written to sealed.{priv,pub} in that directory.
+# Seals stdin to the (expected future) platform state governed by the policy
+# variables (PCR list `pcrlist` with binary values `pcrvalues` and monotonic
+# counter with handle `counterhandle` and value `countervalue`) from the
+# argument working directory.  Sealed data is written to sealed.{priv,pub} in
+# that directory.
 seal_data() {(
     local workdir=${1:-.}
     # Make sure we don't unintentionally send input to anything but
@@ -482,14 +535,14 @@ seal_data() {(
     exec 3<&0 </dev/null
     trap 'rc=$?; trap - EXIT; lc_tpm tpm2_flushcontext -t; lc_tpm tpm2_flushcontext -s; exit $rc' EXIT
     rm -f "$workdir"/sealed.pub "$workdir"/sealed.priv
-    local pctx="$workdir"/pctx.ctx
-    local sctx="$workdir"/session.ctx
-    local policy="$workdir"/policy
+    local pctx=$workdir/pctx.ctx
+    local sctx=$workdir/session.ctx
+    local policy=$workdir/policy
     lc_tpm tpm2_createprimary -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$pctx" && \
         lc_tpm tpm2_startauthsession -S "$sctx" && \
-        lc_tpm tpm2_policypcr -S "$sctx" -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
-        lc_tpm tpm2_policynv -S "$sctx" -C o -i "$workdir"/counter -L "$policy" "$COUNTER_HANDLE" ule && \
-        lc_tpm tpm2_create -C "$pctx" -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -i - -L "$policy" -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub <&3 3<&-
+        lc_tpm tpm2_policypcr -S "$sctx" -l sha256:"$(cat "$workdir"/pcrlist)" -f "$workdir"/pcrvalues && \
+        lc_tpm tpm2_policynv -S "$sctx" -C o -L "$policy" -i "$workdir"/countervalue "$(cat "$workdir"/counterhandle)" ule && \
+        lc_tpm tpm2_create -C "$pctx" -g sha256 -a 'fixedtpm|fixedparent|adminwithpolicy|noda' -L "$policy" -i - -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub <&3 3<&-
 )}
 
 # Attempts to unseal the sealed data (sealed.{priv,pub}) from the given working
@@ -498,14 +551,18 @@ seal_data() {(
 #
 # This will use current PCR values and/or monotonic counter value in creating
 # the policy session if the expected values are not available: on failure, this
-# mainly impacts the error reported by the TPM, because any increment to the
+# mainly impacts the error reported by the TPM (policy hash mismatch instead of
+# failure at some policy verification step), because any increment to the
 # monotonic counter or change in PCR values from those used to create the
 # policy at seal time would have resulted in a policy verification failure
-# anyway. (Note well that this property is an artifact of how our policy is
-# constructed, and is not in general a safe assumption about TPM policies: you
-# can craft policies that would verify when reconstructed with the original
-# values, but would obviously fail the policy hash check when constructed with
-# the current (different) values. TPM policy validation is subtle.)
+# anyway.
+#
+# (Note that this property is an artifact of how our policy is constructed and
+# how/when loaders are sealed, and is not in general a safe assumption about
+# TPM policies: you can craft policies and sealing behaviors that would unseal
+# when the policy is reconstructed with the original values, but would
+# obviously fail the policy hash check when constructed with the current
+# (different) values.)
 unseal_data() {(
     local workdir=${1:-.}
     # Make sure we don't unintentionally send anything but the output of
@@ -513,18 +570,23 @@ unseal_data() {(
     # don't have to explicitly restore stdout for the caller.
     exec 3>&1 >&2
     trap 'rc=$?; trap - EXIT; lc_tpm tpm2_flushcontext -t; lc_tpm tpm2_flushcontext -s; exit $rc' EXIT
-    if [ ! -r "$workdir"/pcrs ]; then
-        read_pcrs "$workdir"/pcrs || return 1
+
+    [ -r "$workdir"/pcrlist ] || printf %s "$SEAL_PCRS" >$workdir/pcrlist || return 1
+    if [ ! -r "$workdir"/pcrvalues ]; then
+        read_pcrs "$(cat "$workdir"/pcrlist)" "$workdir"/pcrvalues || return 1
     fi
-    if [ ! -r "$workdir"/counter ]; then
-        read_counter "$workdir"/counter || return 1
+
+    [ -r "$workdir"/counterhandle ] || printf %s "$COUNTER_HANDLE" >$workdir/counterhandle || return 1
+    if [ ! -r "$workdir"/countervalue ]; then
+        read_counter "$(cat "$workdir"/counterhandle)" "$workdir"/countervalue || return 1
     fi
-    local pctx="$workdir"/pctx.ctx
-    local sctx="$workdir"/session.ctx
+
+    local pctx=$workdir/pctx.ctx
+    local sctx=$workdir/session.ctx
     lc_tpm tpm2_createprimary -C o -g sha256 -G ecc256:null:aes128cfb -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt' -c "$pctx" && \
         lc_tpm tpm2_load -C "$pctx" -r "$workdir"/sealed.priv -u "$workdir"/sealed.pub -c "$workdir"/load.ctx && \
         lc_tpm tpm2_startauthsession -S "$sctx" --policy-session && \
-        lc_tpm tpm2_policypcr -S "$sctx" -l sha256:"$SEAL_PCRS" -f "$workdir"/pcrs && \
-        lc_tpm tpm2_policynv -C o -S "$sctx" -i "$workdir"/counter "$COUNTER_HANDLE" ule && \
+        lc_tpm tpm2_policypcr -S "$sctx" -l sha256:"$(cat "$workdir"/pcrlist)" -f "$workdir"/pcrvalues && \
+        lc_tpm tpm2_policynv -S "$sctx" -C o -i "$workdir"/countervalue "$(cat "$workdir"/counterhandle)" ule && \
         lc_tpm tpm2_unseal -c "$workdir"/load.ctx -p session:"$sctx" >&3 3>&-
 )}

@@ -93,7 +93,7 @@ else
 
     if [ -n "$inc_counter" ]; then
         echo "Incrementing monotonic counter"
-        do_or_show increment_counter
+        do_or_show increment_counter "$COUNTER_HANDLE"
     fi
 
     if [ -z "$no_seal" ]; then
