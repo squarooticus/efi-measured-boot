@@ -38,10 +38,9 @@ jobs:
             VERSION="${BASE}~git${DATE}.${SHA}"
           fi
           echo "version=$VERSION" >>$GITHUB_OUTPUT
-          echo "is_tag=$([[ "$GITHUB_REF" == refs/tags/v* ]] && echo true || echo false)" >>$GITHUB_OUTPUT
 
       - name: Patch changelog for pre-release
-        if: ${{ steps.version.outputs.is_tag == 'false' }}
+        if: github.ref_type != 'tag'
         env:
           DEBEMAIL: noreply@github.com
           DEBFULLNAME: GitHub Actions
@@ -64,7 +63,7 @@ jobs:
           echo "built_deb=$(readlink -f ../efi-measured-boot_*.deb)" >>$GITHUB_OUTPUT
 
       - name: Upload artifact (branch push)
-        if: ${{ steps.version.outputs.is_tag == 'false' }}
+        if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v7.0.1
         with:
           name: efi-measured-boot_${{ steps.version.outputs.version }}_amd64
@@ -72,7 +71,7 @@ jobs:
           retention-days: 30
 
       - name: Create GitHub Release (tag push)
-        if: ${{ steps.version.outputs.is_tag == 'true' }}
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v3.0.1
         with:
           name: efi-measured-boot ${{ steps.version.outputs.version }}
