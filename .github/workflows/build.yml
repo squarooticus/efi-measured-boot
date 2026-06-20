@@ -1,0 +1,80 @@
+on:
+  push:
+    branches: ['**']
+    tags: ['v[0-9]*']
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-debs:
+    runs-on: ubuntu-latest
+    container: debian:testing-slim
+    permissions:
+      contents: write
+
+    steps:
+      - name: Initialize container workspace
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends git dpkg-dev devscripts debhelper build-essential equivs
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Compute version
+        id: version
+        run: |
+          git config --global --add safe.directory $(pwd)
+          BASE=$(dpkg-parsechangelog -SVersion)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            DATE=$(date -u +%Y%m%d)
+            SHA=$(git rev-parse --short HEAD)
+            VERSION="${BASE}~git${DATE}.${SHA}"
+          fi
+          echo "version=$VERSION" >>$GITHUB_OUTPUT
+          echo "is_tag=$([[ "$GITHUB_REF" == refs/tags/v* ]] && echo true || echo false)" >>$GITHUB_OUTPUT
+
+      - name: Patch changelog for pre-release
+        if: ${{ steps.version.outputs.is_tag == 'false' }}
+        env:
+          DEBEMAIL: noreply@github.com
+          DEBFULLNAME: GitHub Actions
+        run: |
+          dch --newversion "${{ steps.version.outputs.version }}" \
+              --distribution unstable \
+              --no-auto-nmu \
+              --force-bad-version \
+              "Automated pre-release build ($(git rev-parse HEAD))."
+
+      - name: Install build dependencies
+        run: |
+          mk-build-deps
+          apt install -y --no-install-recommends ./*-build-dep*.deb
+
+      - name: Build
+        id: build
+        run: |
+          DEB_BUILD_OPTIONS=noautodbgsym dpkg-buildpackage -b -us -uc
+          echo "built_deb=$(readlink -f ../efi-measured-boot_*.deb)" >>$GITHUB_OUTPUT
+
+      - name: Upload artifact (branch push)
+        if: ${{ steps.version.outputs.is_tag == 'false' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: efi-measured-boot_${{ steps.version.outputs.version }}_amd64
+          path: ${{ steps.build.outputs.built_deb }}
+          retention-days: 30
+
+      - name: Create GitHub Release (tag push)
+        if: ${{ steps.version.outputs.is_tag == 'true' }}
+        uses: softprops/action-gh-release@v3.0.1
+        with:
+          name: efi-measured-boot ${{ steps.version.outputs.version }}
+          files: ${{ steps.build.outputs.built_deb }}
+          prerelease: false
