@@ -54,7 +54,7 @@ if [ "$CRYPTTAB_TRIED" = 0 ]; then
         pcrlist=$(cat "$tmpdir"/pcrlist)
         counterhandle=$(cat "$tmpdir"/counterhandle)
 
-        verbose_do -t tpm,boot -l $LL_INFO eval 'read_pcrs "$pcrlist" >"$tmpdir"/current_pcrvalues.txt'
+        verbose_do -t tpm,boot -l $LL_INFO eval 'read_pcrs "$pcrlist" >$tmpdir/current_pcrvalues.txt'
         verbose_do -t tpm,boot -l $LL_INFO eval 'read_counter "$counterhandle" "$tmpdir"/current_countervalue'
 
         log_info -t tpm,boot 'counter %s: current=%d expects<=%d' "$counterhandle" "0x$(xxd -p -c9999 <"$tmpdir"/current_countervalue)" "0x$(xxd -p -c9999 <"$tmpdir"/countervalue)"
