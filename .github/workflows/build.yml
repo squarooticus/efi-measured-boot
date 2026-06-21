@@ -21,32 +21,43 @@ jobs:
         uses: actions/checkout@v7
         with:
           submodules: true
+          fetch-tags: true
 
-      - name: Compute version
-        id: version
+      - name: Work around permissions
         run: |
           git config --global --add safe.directory "$(pwd)"
-          BASE=$(dpkg-parsechangelog -SVersion)
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-          else
-            DATE=$(date -u +%Y%m%d)
-            SHA=$(git rev-parse --short HEAD)
-            VERSION="${BASE}~git${DATE}.${SHA}"
-          fi
+
+      - name: Derive release version
+        id: relver
+        if: github.ref_type == 'tag'
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
           echo "version=$VERSION" >>$GITHUB_OUTPUT
 
-      - name: Patch changelog for pre-release
+      - name: Derive CI version
+        id: civer
+        if: github.ref_type != 'tag'
+        run: |
+          BASE=$(dpkg-parsechangelog -SVersion)
+          if git rev-parse -q --verify "refs/tags/v${BASE}" >/dev/null; then
+            BASE=${BASE}.0.0.1
+          fi
+          DATE=$(date -u +%Y%m%d)
+          SHA=$(git rev-parse --short HEAD)
+          VERSION="${BASE}~git${DATE}.${SHA}"
+          echo "version=$VERSION" >>$GITHUB_OUTPUT
+
+      - name: Patch changelog for CI build
         if: github.ref_type != 'tag'
         env:
           DEBEMAIL: noreply@github.com
           DEBFULLNAME: GitHub Actions
         run: |
-          dch --newversion "${{ steps.version.outputs.version }}" \
+          dch --newversion "${{ steps.civer.outputs.version }}" \
               --distribution unstable \
               --no-auto-nmu \
               --force-bad-version \
-              "Automated pre-release build ($(git rev-parse HEAD))."
+              "Automated CI build ($(git rev-parse HEAD))."
 
       - name: Install build dependencies
         run: |
@@ -63,7 +74,7 @@ jobs:
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: efi-measured-boot_${{ steps.version.outputs.version }}_amd64
+          name: efi-measured-boot_${{ steps.civer.outputs.version }}_amd64
           path: ${{ steps.build.outputs.built_deb }}
           retention-days: 30
 
@@ -71,6 +82,6 @@ jobs:
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v3.0.1
         with:
-          name: efi-measured-boot ${{ steps.version.outputs.version }}
+          name: efi-measured-boot ${{ steps.relver.outputs.version }}
           files: ${{ steps.build.outputs.built_deb }}
           prerelease: false
