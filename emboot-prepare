@@ -77,6 +77,7 @@ EOF
 }
 
 check_gpt() {
+    is_gpt=
     local rootdev
     rootdev=$(get_device_info / | awk '{print $2}') || {
         status "$FAIL" "Cannot determine root device"
@@ -105,46 +106,7 @@ EOF
         return 1
     fi
     status "$PASS" "Boot disk $bootdisk uses GPT"
-}
-
-# Returns 0 if grub-efi is the active bootloader, 1 otherwise.
-# Sets grub_efi_installed and grub_pc_installed.
-check_grub() {
-    grub_efi_installed=
-    grub_pc_installed=
-    if dpkg-query -W -f='${Status}' grub-efi-amd64 2>/dev/null | grep -q "ok installed"; then
-        grub_efi_installed=1
-    fi
-    if dpkg-query -W -f='${Status}' grub-pc 2>/dev/null | grep -q "ok installed"; then
-        grub_pc_installed=1
-    fi
-
-    if [ -n "$grub_efi_installed" ]; then
-        status "$PASS" "grub-efi-amd64 is installed"
-
-        # Check GRUB_ENABLE_CRYPTODISK
-        if [ -f /etc/default/grub ]; then
-            if grep -qE '^\s*GRUB_ENABLE_CRYPTODISK\s*=\s*[yY1]' /etc/default/grub 2>/dev/null; then
-                status "$PASS" "GRUB_ENABLE_CRYPTODISK=y is set"
-            else
-                status "$WARN" "GRUB_ENABLE_CRYPTODISK is not set (needed for GRUB recovery boot)"
-                warnings+=( "GRUB_ENABLE_CRYPTODISK should be enabled for recovery" )
-                automated_available+=( "set_grub_cryptodisk" )
-            fi
-        fi
-        return 0
-    fi
-
-    if [ -n "$grub_pc_installed" ]; then
-        status "$FAIL" "grub-pc (legacy BIOS) is installed; grub-efi is required"
-        blocking_issues+=( "grub-efi must be installed (grub-pc detected)" )
-        automated_available+=( "install_grub_efi" )
-        return 1
-    fi
-
-    status "$WARN" "Neither grub-efi-amd64 nor grub-pc found"
-    blocking_issues+=( "A bootloader must be installed" )
-    return 1
+    is_gpt=1
 }
 
 check_esp() {
@@ -184,6 +146,48 @@ EOF
         status "$PASS" "ESP mounted at /boot/efi (${esp_size_mib}MiB, ${esp_free_mib}MiB free)"
     fi
     esp_ok=1
+}
+
+# Returns 0 if grub-efi is the active bootloader, 1 otherwise.
+# Sets grub_efi_installed and grub_pc_installed.
+check_grub() {
+    grub_efi_installed=
+    grub_pc_installed=
+    if dpkg-query -W -f='${Status}' grub-efi-amd64 2>/dev/null | grep -q "ok installed"; then
+        grub_efi_installed=1
+    fi
+    if dpkg-query -W -f='${Status}' grub-pc 2>/dev/null | grep -q "ok installed"; then
+        grub_pc_installed=1
+    fi
+
+    if [ -n "$grub_efi_installed" ]; then
+        status "$PASS" "grub-efi-amd64 is installed"
+
+        # Check GRUB_ENABLE_CRYPTODISK
+        if [ -f /etc/default/grub ]; then
+            if grep -qE '^\s*GRUB_ENABLE_CRYPTODISK\s*=\s*[yY1]' /etc/default/grub 2>/dev/null; then
+                status "$PASS" "GRUB_ENABLE_CRYPTODISK=y is set"
+            else
+                status "$WARN" "GRUB_ENABLE_CRYPTODISK is not set (needed for GRUB recovery boot)"
+                warnings+=( "GRUB_ENABLE_CRYPTODISK should be enabled for recovery" )
+                automated_available+=( "set_grub_cryptodisk" )
+            fi
+        fi
+        return 0
+    fi
+
+    if [ -n "$grub_pc_installed" ]; then
+        status "$FAIL" "grub-pc (legacy BIOS) is installed; grub-efi is required"
+        blocking_issues+=( "grub-efi must be installed (grub-pc detected)" )
+        if [ -n "$esp_ok" ] && [ -n "$is_gpt" ]; then
+            automated_available+=( "install_grub_efi" )
+        fi
+        return 1
+    fi
+
+    status "$WARN" "Neither grub-efi-amd64 nor grub-pc found"
+    blocking_issues+=( "grub-efi must be installed (no version of GRUB found)" )
+    return 1
 }
 
 check_boot_on_root() {
@@ -345,8 +349,8 @@ check_root
 check_arch || true
 check_uefi_mode || true
 check_gpt || true
-check_grub || true
 check_esp || true
+check_grub || true
 check_boot_on_root || true
 check_luks || true
 check_tpm || true
