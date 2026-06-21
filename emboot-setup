@@ -138,8 +138,15 @@ run_checks
 # ---------------------------------------------------------------------------
 
 legacy_items=()
-[ -e /usr/local/sbin/update-emboot ] && legacy_items+=( /usr/local/sbin/update-emboot )
-[ -e /usr/local/share/efi-measured-boot ] && legacy_items+=( /usr/local/share/efi-measured-boot )
+for legacy_file in \
+    /usr/local/sbin/update-emboot \
+    /usr/local/share/efi-measured-boot \
+    /etc/initramfs-tools/hooks/efi-measured-boot \
+    /etc/kernel/postrm.d/zz-efi-measured-boot \
+    /etc/kernel/postinst.d/zz-efi-measured-boot \
+    ; do
+    [ -e "$legacy_file" ] && legacy_items+=( "$legacy_file" )
+done
 
 if [ ${#legacy_items[@]} -gt 0 ]; then
     echo "" >&2
@@ -223,7 +230,7 @@ read_efi_vars
 bn=${efi_apps[$(emboot_loader_path | tr a-z A-Z)]%%$'\t'*}
 if [ -z "$bn" ]; then
     echo "Cannot find emboot EFI boot entry for $(emboot_loader_path)" >&2
-    echo "Re-run emboot-setup after the EFI entry is created." >&2
+    echo "Re-run \`emboot-setup\` after the EFI entry is created." >&2
     exit 1
 fi
 efibootmgr -n "$bn" 2>/dev/null
@@ -231,3 +238,6 @@ efibootmgr -n "$bn" 2>/dev/null
 echo "" >&2
 echo "Setup complete. Reboot now to activate the emboot chain." >&2
 echo "On first boot, the system will automatically seal the LUKS passphrase to the TPM." >&2
+if [ ${#legacy_items[@]} -gt 0 ]; then
+    echo "If you are upgrading from (and booting from) a legacy /usr/local install, you can simply run \`update-emboot -s\` now to seal the passphrase to the new loaders and avoid entering your passphrase on the next boot." | fold -s -w $(( ${COLUMNS:-80} - 5 ))
+fi
