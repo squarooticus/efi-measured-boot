@@ -91,7 +91,7 @@ Your system should now be ready to install the EFI measured boot software stack.
 
 ## Installation
 
-Build and install the package from source:
+Install the latest [release](https://github.com/squarooticus/efi-measured-boot/releases) from Github, or build and install the package from source:
 
 ```
 git submodule update --init
@@ -121,8 +121,10 @@ Once the package is installed:
    $EDITOR /etc/efi-measured-boot/config
    ```
 
-   The generated defaults suit most Debian systems. You may want to adjust
-   `OS_SHORT_NAME`, `SEAL_PCRS`, or `KERNEL_PARAMS`.
+   The generated defaults suit most Debian systems, but you probably want to check
+   `KERNEL_PARAMS` just to be sure. In less common cases, you may wish to adjust
+   `OS_SHORT_NAME` or `SEAL_PCRS`. If you don't want it messing with the UEFI
+   boot order to put emboot first, set `UPDATE_BOOT_ORDER=n`.
 
 3. **Run first-time setup**:
 
