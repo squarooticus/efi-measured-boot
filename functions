@@ -102,15 +102,18 @@ LL_ERROR=1
 LL_FATAL=0
 LL_ALWAYS=0
 
-# Remember to declare `local OPTIND OPTARG topics level` beforehand, and `shift
-# $((OPTIND-1))` afterwards. Stops at `--`. Level defaults to $LL_INFO.
+# Remember to declare `local OPTIND OPTARG silence_stderr topics level`
+# beforehand, and `shift $((OPTIND-1))` afterwards. Stops at `--`. Level
+# defaults to $LL_INFO.
 log_parse_optargs() {
     OPTIND=0
     OPTARG=
+    silence_stderr=
     topics=
     level=${level:-$LL_INFO}
-    while getopts 't:l:-' opt; do
+    while getopts 'Qt:l:-' opt; do
         case "$opt" in
+            Q) silence_stderr=1 ;;
             t) topics=$OPTARG ;;
             l) level=$OPTARG ;;
             -) return ;;
@@ -121,7 +124,7 @@ log_parse_optargs() {
 
 # Returns 0 if the given topic/level would be logged
 would_log() {
-    local OPTIND OPTARG topics level
+    local OPTIND OPTARG silence_stderr topics level
     log_parse_optargs "$@"
     shift $((OPTIND-1))
 
@@ -135,7 +138,7 @@ maxtopicwidth=15
 
 # By default, regular output that should always be displayed
 log() {
-    local OPTIND OPTARG topics level=$LL_ALWAYS
+    local OPTIND OPTARG silence_stderr topics level=$LL_ALWAYS
     log_parse_optargs "$@"
     shift $((OPTIND-1))
 
@@ -150,7 +153,7 @@ log() {
 # Create the log_<level> functions
 for ll in debug info warn error fatal; do
     eval " log_$ll() {
-    local OPTIND OPTARG topics level=\$LL_$(printf %s "$ll" | tr a-z A-Z)
+    local OPTIND OPTARG silence_stderr topics level=\$LL_$(printf %s "$ll" | tr a-z A-Z)
     log_parse_optargs \"\$@\"
     shift \$((OPTIND-1))
 
@@ -169,7 +172,7 @@ done
 # before even getting here, so use eval with a (single-quoted) string to avoid
 # doing unnecessary work.
 verbose_do() {
-    local OPTIND OPTARG topics level
+    local OPTIND OPTARG silence_stderr topics level
     log_parse_optargs "$@"
     shift $((OPTIND-1))
 
@@ -204,19 +207,9 @@ fd_info() {
 }
 
 # Logs the given command to stderr if `would_log <optargs>`. Runs the command
-# regardless. An additional option `-Q` will redirect stderr to /dev/null for
-# the command itself but MUST be the first argument.
+# regardless. Make sure `silence_stderr`, `topics`, and `level` are
+# appropriately set prior to calling this function.
 log_command() {
-    local silence_stderr=
-    if [ "$1" = "-Q" ]; then
-        silence_stderr=1
-        shift
-    fi
-
-    local OPTIND OPTARG topics level=$LL_DEBUG
-    log_parse_optargs "$@"
-    shift $((OPTIND-1))
-
     if would_log -t "$topics" -l "$level"; then
         cmd=$(quote_args "$@")
         fdi=$(fd_info 0)
@@ -234,7 +227,7 @@ log_command() {
 # the commands normally.
 
 lc_tpm() {
-    local OPTIND OPTARG topics level=$LL_DEBUG
+    local OPTIND OPTARG silence_stderr topics level=$LL_DEBUG
     log_parse_optargs "$@"
     shift $((OPTIND-1))
     topics=tpm${topics:+,}$topics
@@ -252,17 +245,17 @@ lc_tpm() {
         shift
         set -- "$cmd" -Q "$@"
     fi
-    log_command ${silence_stderr:+-Q} -t "$topics" -l $level "$@"
+    log_command "$@"
 }
 
 for class in core luks efi misc; do
     eval " lc_$class() {
-    local OPTIND OPTARG topics level=\$LL_DEBUG
+    local OPTIND OPTARG silence_stderr topics level=\$LL_DEBUG
     log_parse_optargs \"\$@\"
     shift \$((OPTIND-1))
     topics=$class\${topics:+,}\$topics
 
-    log_command -t \"\$topics\" -l \$level \"\$@\"
+    log_command \"\$@\"
 }"
 done
 
@@ -503,7 +496,7 @@ export_luks_token() {
     local cryptdev=$2
     local token_id=$3
 
-    md=$(lc_luks cryptsetup token export "$cryptdev" --token-id "$token_id" 2>/dev/null)
+    md=$(lc_luks -Q cryptsetup token export "$cryptdev" --token-id "$token_id")
     if [ -z "$md" ]; then
         return 1
     fi

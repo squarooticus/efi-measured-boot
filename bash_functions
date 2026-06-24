@@ -175,15 +175,15 @@ read_efi_vars() {
             fi
             log_debug -t efi 'reading EFI entry %s: desc=%s partuuid=%s loader=%s' "$bootnum" "$desc" "$partuuid" "$loader"
             efi_apps[$(printf %s "$loader" | tr a-z A-Z)]=$bootnum$'\t'$desc$'\t'$partuuid$'\t'$loader
-        done < <(efibootmgr -v 2>/dev/null | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-zA-Z,-]\+\))\/\(.*\)/\4\t\1\t\2\t\3/')
+        done < <(lc_efi -Q efibootmgr -v | lc_misc grep '^Boot[0-9a-fA-F]\{4\}' | lc_misc sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-zA-Z,-]\+\))\/\(.*\)/\4\t\1\t\2\t\3/')
         local IFS=','
         declare -ga efi_boot_order
-        efi_boot_order=( $(efibootmgr -v 2>/dev/null | grep '^BootOrder' | sed -e 's/^BootOrder: *//') )
+        efi_boot_order=( $(lc_efi -Q efibootmgr -v | lc_misc grep '^BootOrder' | lc_misc sed -e 's/^BootOrder: *//') )
         local IFS=$oldIFS
         log_debug -t efi 'EFI boot order: %s' "${efi_boot_order[*]}"
 
         declare -g efi_boot_current
-        efi_boot_current=$(efibootmgr -v 2>/dev/null | grep '^BootCurrent' | sed -e 's/^BootCurrent: *//')
+        efi_boot_current=$(lc_efi -Q efibootmgr -v | lc_misc grep '^BootCurrent' | lc_misc sed -e 's/^BootCurrent: *//')
         log_debug -t efi 'EFI boot current: %s' "$efi_boot_current"
 
         declare -g efi_vars_available=1
@@ -207,7 +207,7 @@ create_emboot_efi_entry() {
     local efidisk=${efi_disk_and_part[0]}
     local efipartition=${efi_disk_and_part[1]}
     local loader=\\EFI\\$OS_SHORT_NAME\\$loader_basename
-    lc_efi efibootmgr -C -d "$efidisk" -p "$efipartition" -l "$loader" -L "$OS_SHORT_NAME emboot${tag:+ ($tag)}" 2>/dev/null
+    lc_efi -Q efibootmgr -C -d "$efidisk" -p "$efipartition" -l "$loader" -L "$OS_SHORT_NAME emboot${tag:+ ($tag)}"
 }
 
 # Given a crypto device, populates `luksmd` with the output of dumping the LUKS
@@ -251,7 +251,7 @@ get_emboot_key_slot() {
         local one_token_id=${emboot_token_ids[0]}
         first_keyslot=$(printf %s "${luksmd[$cryptdev]}" | lc_misc jq -j '.tokens."'"$one_token_id"'".keyslots | first')
         if [ -n "$first_keyslot" -a "$first_keyslot" != "null" ]; then
-            if lc_luks cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" --key-slot "$first_keyslot" "$cryptdev" </dev/null >/dev/null 2>&1; then
+            if lc_luks -Q cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" --key-slot "$first_keyslot" "$cryptdev" </dev/null >/dev/null; then
                 log_info -t luks 'Passphrase found in keyslot %s (from token %s)' "$first_keyslot" "$one_token_id"
                 printf %s "$first_keyslot"
                 return 0
@@ -260,12 +260,12 @@ get_emboot_key_slot() {
             fi
         fi
     fi
-    local keyslots=( $(printf %s "${luksmd[$cryptdev]}" | lc_misc jq -j '.keyslots | keys | join(" ")') )
+    local keyslots=( $(lc_misc printf %s "${luksmd[$cryptdev]}" | lc_misc jq -j '.keyslots | keys | join(" ")') )
     local i
     for i in "${keyslots[@]}"; do
         if [ "$i" = "$first_keyslot" ]; then
             log_debug -t luks 'Skipping keyslot %s' "$i"
-        elif lc_luks cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" --key-slot "$i" "$cryptdev" </dev/null >/dev/null 2>&1; then
+        elif lc_luks -Q cryptsetup luksOpen --test-passphrase -d "$LUKS_KEY" --key-slot "$i" "$cryptdev" </dev/null >/dev/null; then
             log_info -t luks 'Passphrase found in keyslot %s' "$i"
             printf %s "$i"
             return 0
@@ -332,7 +332,7 @@ stub_does_extra_pcr_4_measurement() {
     fi
 
     log_warn -t loader %s 'Stub version not found; falling back to checking event log'
-    bsa_count=$(lc_tpm tpm2_eventlog /sys/kernel/security/tpm0/binary_bios_measurements 2>/dev/null | awk '
+    bsa_count=$(lc_tpm -Q tpm2_eventlog /sys/kernel/security/tpm0/binary_bios_measurements | awk '
     $1 == "-" && $2 == "EventNum:" { inpcr4=0; inbsa=0; next}
     $1 == "PCRIndex:" && $2 == "4" { inpcr4=1; next }
     inpcr4 && $1 == "EventType:" && $2 == "EV_EFI_BOOT_SERVICES_APPLICATION" { inbsa=1; print "pcr4bsa"; next }' | wc -l)
@@ -449,7 +449,7 @@ update_efi_boot_order() {(
         done
         IFS=','
         log 'Updating EFI boot order to %s' "${new_boot_order[*]}"
-        efibootmgr -o "${new_boot_order[*]}" 2>/dev/null
+        lc_efi -Q efibootmgr -o "${new_boot_order[*]}"
         OFS=$oldIFS
 
         evict_efi_vars
