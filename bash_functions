@@ -323,11 +323,14 @@ stub_does_extra_pcr_4_measurement() {
     local stubver=$(strings "$loader" | grep LoaderInfo | awk '{print $4;}')
     if [ -n "$stubver" ]; then
         if (( ${stubver%%.*} < 252 )); then
-            log_debug -t loader 'Found old stub (version %s)' "$stubver"
+            log_debug -t loader 'Found pre-LoadImage stub (version %s)' "$stubver"
             return 1
-        else
-            log_debug -t loader 'Found new stub (version %s)' "$stubver"
+        elif (( ${stubver%%.*} < 259 )); then
+            log_debug -t loader 'Found LoadImage-era stub (version %s)' "$stubver"
             return 0
+        else
+            log_debug -t loader 'Found post-LoadImage stub (version %s)' "$stubver"
+            return 1
         fi
     fi
 
