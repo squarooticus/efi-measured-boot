@@ -169,10 +169,13 @@ read_efi_vars() {
         local IFS=$'\t'
         local loader bootnum desc partuuid
         while read -r loader bootnum desc partuuid; do
+            if [[ $loader = File\(*\) ]]; then
+                loader=${loader#File(}
+                loader=${loader%)}
+            fi
             log_debug -t efi 'reading EFI entry %s: desc=%s partuuid=%s loader=%s' "$bootnum" "$desc" "$partuuid" "$loader"
             efi_apps[$(printf %s "$loader" | tr a-z A-Z)]=$bootnum$'\t'$desc$'\t'$partuuid$'\t'$loader
-        done < <(efibootmgr -v 2>/dev/null | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-fA-F-]\+\),.*File(\([^)]\+\)).*/\4\t\1\t\2\t\3/')
-
+        done < <(efibootmgr -v 2>/dev/null | grep '^Boot[0-9a-fA-F]\{4\}' | sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-zA-Z,-]\+\))\/\(.*\)/\4\t\1\t\2\t\3/')
         local IFS=','
         declare -ga efi_boot_order
         efi_boot_order=( $(efibootmgr -v 2>/dev/null | grep '^BootOrder' | sed -e 's/^BootOrder: *//') )
