@@ -1,3 +1,9 @@
+efi-measured-boot (0.9.2) unstable; urgency=medium
+
+  * Work with Forky stub
+
+ -- Kyle Rose <krose@krose.org>  Fri, 26 Jun 2026 08:04:06 -0400
+
 efi-measured-boot (0.9.1) unstable; urgency=medium
 
   * Enhance legacy install management
