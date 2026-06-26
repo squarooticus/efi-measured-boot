@@ -31,8 +31,13 @@ jobs:
         id: relver
         if: github.ref_type == 'tag'
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          echo "version=$VERSION" >>$GITHUB_OUTPUT
+          FROMTAG="${GITHUB_REF#refs/tags/v}"
+          FROMLOG=$(dpkg-parsechangelog -SVersion)
+          if [ "$FROMTAG" != "$FROMLOG" ]; then
+            echo "Version from tag ($FROMTAG) does not match version from Debian changelog ($FROMLOG)" >&2
+            exit 1
+          fi
+          echo "version=$FROMTAG" >>$GITHUB_OUTPUT
 
       - name: Derive CI version
         id: civer
