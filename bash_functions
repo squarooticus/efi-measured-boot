@@ -148,6 +148,200 @@ list_installed_kernels() {(
     done
 )}
 
+# GUID for the standard EFI global variable namespace, where Boot####,
+# BootOrder, and BootCurrent live.
+EFI_GLOBAL_VARS_GUID=8be4df61-93ca-11d2-aa0d-00e098032b8c
+
+# Fetches the raw value of the given EFI variable (in "GUID-Name" form, as
+# produced by `efivar -l`) and flattens efivar's od-style hex dump (an
+# 8-digit offset column, two groups of 8 space-separated hex byte pairs, and
+# an ASCII rendering in |...|) down to one contiguous lowercase hex string
+# (two hex characters per byte, no separators). Outputs the empty string if
+# the variable does not exist or efivar fails for any other reason (e.g.
+# non-UEFI system, insufficient permissions); callers must treat an
+# empty/too-short result as "value unavailable", not an error.
+efi_var_hex() {
+    local varname=$1
+    lc_efi -Q efivar -p -n "$varname" | lc_misc gawk '
+        /^[0-9a-fA-F]{8} / {
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ /^[0-9a-fA-F][0-9a-fA-F]$/) printf "%s", $i
+            }
+        }'
+}
+
+# Extracts a little-endian unsigned integer from a flat hex string (as
+# produced by efi_var_hex), given a byte offset and byte length, and prints
+# it in decimal. Out-of-range access (offset/length past the end of the
+# string) yields 0 rather than erroring; callers are expected to have
+# already range-checked against the declared length of the structure being
+# parsed before calling this.
+efi_hex_le_uint() {
+    local hex=$1 off=$2 len=$3
+    local i swapped=''
+    for (( i = len - 1; i >= 0; i-- )); do
+        swapped+=${hex:$(( (off + i) * 2 )):2}
+    done
+    printf '%d' "$((16#${swapped:-0}))"
+}
+
+# Decodes a null-terminated UCS-2 string (assumed ASCII-range: only the low
+# byte of each 2-byte code unit is used, matching every real description and
+# loader path in practice) starting at the given byte offset in a flat hex
+# string. Stops at the first null code unit, or at the optional byte-offset
+# `limit` (exclusive) if given, or at the physical end of the hex string,
+# whichever comes first.
+#
+# Since bash functions cannot cleanly return two values, this sets two
+# globals instead of using stdout: `efi_ucs2_str` (the decoded string, ASCII)
+# and `efi_ucs2_bytelen` (bytes consumed, including the 2-byte null
+# terminator if one was found).
+#
+# Returns 0 if a genuine null terminator was found before the limit/end of
+# string; returns 1 (data considered malformed/truncated) otherwise, with
+# `efi_ucs2_str`/`efi_ucs2_bytelen` reflecting whatever was decoded up to
+# that point.
+efi_hex_decode_ucs2() {
+    local hex=$1 off=$2 limit=${3:-$((${#hex} / 2))}
+    local i=0 lo hi escapes=''
+    while (( off + i < limit )); do
+        lo=${hex:$(( (off + i) * 2 )):2}
+        hi=${hex:$(( (off + i + 1) * 2 )):2}
+        if [[ -z $lo || ( $lo == 00 && $hi == 00 ) ]]; then
+            i=$((i + 2))
+            efi_ucs2_str=$(printf "${escapes:-}")
+            efi_ucs2_bytelen=$i
+            [[ $lo == 00 && $hi == 00 ]]
+            return
+        fi
+        escapes+="\\x$lo"
+        i=$((i + 2))
+    done
+    efi_ucs2_str=$(printf "${escapes:-}")
+    efi_ucs2_bytelen=$i
+    return 1
+}
+
+# Formats the 16 raw bytes at the given byte offset in a flat hex string as a
+# standard mixed-endian GUID string, matching efibootmgr's / the UEFI
+# spec's display convention (the first 8 bytes -- a UINT32 and two UINT16s --
+# are byte-swapped to little-endian display order; the last 8 bytes are
+# printed as-is).
+efi_hex_format_guid() {
+    local hex=$1 off=$2
+    local -a b
+    local j
+    for (( j = 0; j < 16; j++ )); do
+        b[j]=${hex:$(( (off + j) * 2 )):2}
+    done
+    printf '%s%s%s%s-%s%s-%s%s-%s%s-%s%s%s%s%s%s' \
+        "${b[3]}" "${b[2]}" "${b[1]}" "${b[0]}" \
+        "${b[5]}" "${b[4]}" \
+        "${b[7]}" "${b[6]}" \
+        "${b[8]}" "${b[9]}" \
+        "${b[10]}" "${b[11]}" "${b[12]}" "${b[13]}" "${b[14]}" "${b[15]}"
+}
+
+# Parses the raw hex value of a Boot#### EFI_LOAD_OPTION variable (as
+# produced by efi_var_hex) into its description, partition UUID, and loader
+# path, per the UEFI EFI_LOAD_OPTION structure:
+#
+#   offset 0: Attributes (UINT32 LE)
+#   offset 4: FilePathListLength (UINT16 LE)
+#   offset 6: Description (null-terminated CHAR16[])
+#   offset 6+desclen: FilePathList (UINT8[FilePathListLength]): a TLV chain
+#     of device-path nodes terminated by an END_ENTIRE_DEVICE_PATH node
+#   offset 6+desclen+FilePathListLength: OptionalData (ignored -- this is
+#     exactly the ambiguous, vendor-specific tail that efibootmgr's text
+#     rendering cannot reliably separate from the loader path, especially on
+#     newer libefivar versions that drop the "File(...)" wrapper entirely)
+#
+# Walks the FilePathList looking for a HARDDRIVE_DP node (for the partition
+# GUID) and a MEDIA_FILEPATH_DP node (for the loader path), skipping over any
+# other node type by advancing past its length field (handles PCI/ACPI nodes
+# that may precede the HD node on real hardware; does not assume "HD then
+# File" is the only possible sequence).
+#
+# On success, sets globals `efi_parsed_desc`, `efi_parsed_partuuid`,
+# `efi_parsed_loader` and returns 0. On any parse failure -- entry too
+# short, FilePathListLength pointing past the end of the value, a malformed
+# (too-short) TLV node length, a description/loader string that never hits a
+# null terminator, or a device path missing an HD or FILE_PATH node -- logs
+# a warning (identifying the entry by `bootnum_for_log`) and returns 1
+# without touching the output globals. Entries that fail to parse are
+# skipped by the caller rather than added to `efi_apps` in some
+# partially-parsed state.
+efi_parse_boot_entry() {
+    local bootnum_for_log=$1 hex=$2
+    local total=$(( ${#hex} / 2 ))
+
+    if (( total < 6 )); then
+        log_warn -t efi 'Skipping Boot%s: value too short (%d bytes)' "$bootnum_for_log" "$total"
+        return 1
+    fi
+
+    local fplen=$(efi_hex_le_uint "$hex" 4 2)
+    efi_hex_decode_ucs2 "$hex" 6 "$total" || {
+        log_warn -t efi 'Skipping Boot%s: description string not null-terminated' "$bootnum_for_log"
+        return 1
+    }
+    local desc=$efi_ucs2_str
+    local fp_start=$((6 + efi_ucs2_bytelen))
+    local fp_end=$((fp_start + fplen))
+
+    if (( fp_end > total )); then
+        log_warn -t efi 'Skipping Boot%s: FilePathListLength (%d) extends past end of value' "$bootnum_for_log" "$fplen"
+        return 1
+    fi
+
+    local off=$fp_start found_hd= found_file= loader= partuuid=
+    while (( off + 4 <= fp_end )); do
+        local dp_type=$(efi_hex_le_uint "$hex" $off 1)
+        local dp_subtype=$(efi_hex_le_uint "$hex" $((off + 1)) 1)
+        local dp_len=$(efi_hex_le_uint "$hex" $((off + 2)) 2)
+
+        if (( dp_len < 4 )); then
+            log_warn -t efi 'Skipping Boot%s: malformed device-path node length (%d) at offset %d' "$bootnum_for_log" "$dp_len" "$off"
+            return 1
+        fi
+        if (( dp_type == 0x7f && dp_subtype == 0xff )); then
+            break  # END_ENTIRE_DEVICE_PATH
+        fi
+        if (( dp_type == 0x04 && dp_subtype == 0x01 )); then
+            # MEDIA_DEVICE_PATH / HARDDRIVE_DP (fixed 42-byte node): 16-byte
+            # partition GUID starts 24 bytes in (4-byte TLV header + 20
+            # bytes of PartitionNumber/Start/Size).
+            partuuid=$(efi_hex_format_guid "$hex" $((off + 4 + 20)))
+            found_hd=1
+        elif (( dp_type == 0x04 && dp_subtype == 0x04 )); then
+            # MEDIA_DEVICE_PATH / MEDIA_FILEPATH_DP: null-terminated
+            # CHAR16[] loader path starts right after the 4-byte TLV header,
+            # bounded by this node's own length.
+            efi_hex_decode_ucs2 "$hex" $((off + 4)) $((off + dp_len)) || {
+                log_warn -t efi 'Skipping Boot%s: loader path not null-terminated' "$bootnum_for_log"
+                return 1
+            }
+            loader=$efi_ucs2_str
+            found_file=1
+        fi
+        off=$((off + dp_len))
+    done
+
+    if [[ -z $found_hd ]]; then
+        log_warn -t efi 'Skipping Boot%s: no HARDDRIVE device-path node found' "$bootnum_for_log"
+        return 1
+    fi
+    if [[ -z $found_file ]]; then
+        log_warn -t efi 'Skipping Boot%s: no FILE_PATH device-path node found' "$bootnum_for_log"
+        return 1
+    fi
+
+    efi_parsed_desc=$desc
+    efi_parsed_partuuid=$partuuid
+    efi_parsed_loader=$loader
+    return 0
+}
+
 # Populates:
 #
 #   - An associative array `efi_apps` mapping uppercase loader path to a
@@ -155,35 +349,52 @@ list_installed_kernels() {(
 #   loader)
 #
 #   - An array `efi_boot_order` containing the boot order (each element of
-#   which is 4 hex digits)
+#   which is 4 uppercase hex digits)
 #
-#   - A string `efi_boot_current` containing the current boot entry (also 4 hex
-#   digits)
+#   - A string `efi_boot_current` containing the current boot entry (also 4
+#   uppercase hex digits)
+#
+# Reads directly from the raw EFI_LOAD_OPTION / BootOrder / BootCurrent
+# variable values via `efivar`, rather than parsing efibootmgr's text
+# output, to unambiguously separate a loader's device path from trailing
+# vendor-specific optional data (which efibootmgr -v's text rendering glues
+# onto the path with no delimiter when non-printable -- and on newer
+# libefivar versions, drops the "File(...)" wrapper entirely, removing even
+# the closing-paren heuristic).
 #
 # Caches the result. Use `evict_efi_vars` to evict this cache if the EFI vars
 # are known to have changed.
 read_efi_vars() {
     if [ -z "$efi_vars_available" ]; then
         declare -gA efi_apps=()
-        local oldIFS=$IFS
-        local IFS=$'\t'
-        local loader bootnum desc partuuid
-        while read -r loader bootnum desc partuuid; do
-            if [[ $loader = File\(*\) ]]; then
-                loader=${loader#File(}
-                loader=${loader%)}
-            fi
-            log_debug -t efi 'reading EFI entry %s: desc=%s partuuid=%s loader=%s' "$bootnum" "$desc" "$partuuid" "$loader"
-            efi_apps[$(printf %s "$loader" | tr a-z A-Z)]=$bootnum$'\t'$desc$'\t'$partuuid$'\t'$loader
-        done < <(lc_efi -Q efibootmgr -v | lc_misc grep '^Boot[0-9a-fA-F]\{4\}' | lc_misc sed -e 's/^Boot\([0-9a-fA-F]\{4\}\)[\* ] \([^\t]\+\)\tHD([0-9]\+,GPT,\([0-9a-zA-Z,-]\+\))\/\(.*\)/\4\t\1\t\2\t\3/')
-        local IFS=','
-        declare -ga efi_boot_order
-        efi_boot_order=( $(lc_efi -Q efibootmgr -v | lc_misc grep '^BootOrder' | lc_misc sed -e 's/^BootOrder: *//') )
-        local IFS=$oldIFS
+        declare -ga efi_boot_order=()
+        declare -g efi_boot_current=
+
+        local name bootnum hex
+        while read -r name; do
+            bootnum=$(printf %s "${name#$EFI_GLOBAL_VARS_GUID-Boot}" | tr a-z A-Z)
+            hex=$(efi_var_hex "$name")
+            efi_parse_boot_entry "$bootnum" "$hex" || continue
+            log_debug -t efi 'reading EFI entry %s: desc=%s partuuid=%s loader=%s' \
+                "$bootnum" "$efi_parsed_desc" "$efi_parsed_partuuid" "$efi_parsed_loader"
+            efi_apps[$(printf %s "$efi_parsed_loader" | tr a-z A-Z)]=$bootnum$'\t'$efi_parsed_desc$'\t'$efi_parsed_partuuid$'\t'$efi_parsed_loader
+        done < <(lc_efi -Q efivar -l | lc_misc grep '^'"$EFI_GLOBAL_VARS_GUID"'-Boot[0-9a-fA-F]\{4\}$' || true)
+
+        hex=$(efi_var_hex "$EFI_GLOBAL_VARS_GUID-BootOrder")
+        if [ -n "$hex" ]; then
+            local n=$(( ${#hex} / 4 ))
+            local i v
+            for (( i = 0; i < n; i++ )); do
+                v=$(efi_hex_le_uint "$hex" $((i * 2)) 2)
+                efi_boot_order+=( "$(printf '%04X' "$v")" )
+            done
+        fi
         log_debug -t efi 'EFI boot order: %s' "${efi_boot_order[*]}"
 
-        declare -g efi_boot_current
-        efi_boot_current=$(lc_efi -Q efibootmgr -v | lc_misc grep '^BootCurrent' | lc_misc sed -e 's/^BootCurrent: *//')
+        hex=$(efi_var_hex "$EFI_GLOBAL_VARS_GUID-BootCurrent")
+        if [ -n "$hex" ]; then
+            efi_boot_current=$(printf '%04X' "$(efi_hex_le_uint "$hex" 0 2)")
+        fi
         log_debug -t efi 'EFI boot current: %s' "$efi_boot_current"
 
         declare -g efi_vars_available=1
