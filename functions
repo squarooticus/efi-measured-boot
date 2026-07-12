@@ -203,7 +203,11 @@ fd_type() {
 fd_info() {
     fd=$1
     fdfile=/proc/self/fd/$fd
-    if [ "$(fd_type $1)" = '*' ]; then printf %s "$(readlink -f "$fdfile")"; fi
+    case "$(fd_type $1)" in
+        '*')
+            printf %s "<$(readlink -f "$fdfile")"
+            ;;
+    esac
 }
 
 # Logs the given command to stderr if `would_log <optargs>`. Runs the command
@@ -213,7 +217,7 @@ log_command() {
     if would_log -t "$topics" -l "$level"; then
         cmd=$(quote_args "$@")
         fdi=$(fd_info 0)
-        printf %-"${maxtopicwidth}"'s %s %s%s\n' "[$topics]" "$(fd_type 0)" "$cmd" "${fdi:+" <$fdi"}" >&2
+        printf %-"${maxtopicwidth}"'s %s %s%s\n' "[$topics]" "$(fd_type 0)" "$cmd" "${fdi:+" $fdi"}" >&2
     fi
 
     if [ -n "$silence_stderr" ]; then

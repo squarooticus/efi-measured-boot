@@ -371,14 +371,14 @@ read_efi_vars() {
         declare -g efi_boot_current=
 
         local name bootnum hex
-        while read -r name; do
+        while read -r -u 3 name; do
             bootnum=$(printf %s "${name#$EFI_GLOBAL_VARS_GUID-Boot}" | tr a-z A-Z)
             hex=$(efi_var_hex "$name")
             efi_parse_boot_entry "$bootnum" "$hex" || continue
             log_debug -t efi 'reading EFI entry %s: desc=%s partuuid=%s loader=%s' \
                 "$bootnum" "$efi_parsed_desc" "$efi_parsed_partuuid" "$efi_parsed_loader"
             efi_apps[$(printf %s "$efi_parsed_loader" | tr a-z A-Z)]=$bootnum$'\t'$efi_parsed_desc$'\t'$efi_parsed_partuuid$'\t'$efi_parsed_loader
-        done < <(lc_efi -Q efivar -l | lc_misc grep '^'"$EFI_GLOBAL_VARS_GUID"'-Boot[0-9a-fA-F]\{4\}$' || true)
+        done 3< <(lc_efi -Q efivar -l | lc_misc grep '^'"$EFI_GLOBAL_VARS_GUID"'-Boot[0-9a-fA-F]\{4\}$' || true) </dev/null
 
         hex=$(efi_var_hex "$EFI_GLOBAL_VARS_GUID-BootOrder")
         if [ -n "$hex" ]; then
