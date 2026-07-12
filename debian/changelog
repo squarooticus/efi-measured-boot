@@ -1,3 +1,9 @@
+efi-measured-boot (0.9.3) unstable; urgency=medium
+
+  * Use efivar to read EFI entries
+
+ -- Kyle Rose <krose@krose.org>  Sun, 12 Jul 2026 18:25:00 -0400
+
 efi-measured-boot (0.9.2) unstable; urgency=medium
 
   * Work with Forky stub
