@@ -328,11 +328,11 @@ efi_parse_boot_entry() {
     done
 
     if [[ -z $found_hd ]]; then
-        log_warn -t efi 'Skipping Boot%s: no HARDDRIVE device-path node found' "$bootnum_for_log"
+        log_debug -t efi 'Skipping Boot%s: no HARDDRIVE device-path node found' "$bootnum_for_log"
         return 1
     fi
     if [[ -z $found_file ]]; then
-        log_warn -t efi 'Skipping Boot%s: no FILE_PATH device-path node found' "$bootnum_for_log"
+        log_debug -t efi 'Skipping Boot%s: no FILE_PATH device-path node found' "$bootnum_for_log"
         return 1
     fi
 
