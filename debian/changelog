@@ -1,3 +1,9 @@
+efi-measured-boot (0.9.4) unstable; urgency=medium
+
+  * Be less verbose about non-loader EFI entries
+
+ -- Kyle Rose <krose@krose.org>  Tue, 29 Sep 2026 09:39:26 -0400
+
 efi-measured-boot (0.9.3) unstable; urgency=medium
 
   * Use efivar to read EFI entries
